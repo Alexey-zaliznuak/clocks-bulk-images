@@ -3,6 +3,7 @@ import { useAuth } from "./auth";
 import Login from "./pages/Login";
 import Create from "./pages/Create";
 import History from "./pages/History";
+import BatchPage from "./pages/Batch";
 import type { ReactNode } from "react";
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
@@ -68,6 +69,16 @@ export default function App() {
           <ProtectedRoute>
             <Layout>
               <History />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/batch/:id"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <BatchPage />
             </Layout>
           </ProtectedRoute>
         }
