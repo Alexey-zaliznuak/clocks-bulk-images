@@ -9,7 +9,8 @@
 
 set -u
 
-PROXY_URL="${OPENROUTER_PROXY_URL:-http://zaliznuak20:oT9QirSPKm@5.22.207.240:50101}"
+# HTTP-порт прокси = 50100 (порт 50101 — это SOCKS5, для него схема socks5://)
+PROXY_URL="${OPENROUTER_PROXY_URL:-http://zaliznuak20:oT9QirSPKm@5.22.207.240:50100}"
 RUNS="${RUNS:-10}"
 # Небольшой файл для стресс-теста соединения (можно переопределить)
 DL_URL="${DL_URL:-https://speed.cloudflare.com/__down?bytes=5000000}"
