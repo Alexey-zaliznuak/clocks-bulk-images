@@ -145,13 +145,13 @@ func (s *Store) ClaimNext(ctx context.Context, leaseTimeout time.Duration) (*Tas
 		WHERE id = (
 			SELECT id FROM tasks
 			WHERE status NOT IN ('done','failed')
-			  AND (locked_at IS NULL OR locked_at < now() - ($1 || ' seconds')::interval)
+			  AND (locked_at IS NULL OR locked_at < now() - make_interval(secs => $1))
 			ORDER BY created_at
 			FOR UPDATE SKIP LOCKED
 			LIMIT 1
 		)
 		RETURNING ` + taskColumns
-	row := s.db.QueryRowContext(ctx, query, int(leaseTimeout.Seconds()))
+	row := s.db.QueryRowContext(ctx, query, leaseTimeout.Seconds())
 	t, err := scanTask(row)
 	if err == sql.ErrNoRows {
 		return nil, nil
