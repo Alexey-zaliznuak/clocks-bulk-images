@@ -1,8 +1,9 @@
 module named_clocks/backend
 
-go 1.25.0
+go 1.25.10
 
 require (
+	github.com/OpenRouterTeam/go-sdk v0.5.0
 	github.com/go-chi/chi/v5 v5.3.1
 	github.com/go-chi/cors v1.2.2
 	github.com/golang-jwt/jwt/v5 v5.3.1
@@ -25,6 +26,7 @@ require (
 	github.com/minio/md5-simd v1.1.2 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/rs/xid v1.6.0 // indirect
+	github.com/spyzhov/ajson v0.8.0 // indirect
 	github.com/tinylib/msgp v1.6.1 // indirect
 	github.com/zeebo/xxh3 v1.1.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect

@@ -1,29 +1,29 @@
 package openrouter
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	orsdk "github.com/OpenRouterTeam/go-sdk"
+	"github.com/OpenRouterTeam/go-sdk/models/components"
+	"github.com/OpenRouterTeam/go-sdk/retry"
 )
 
-// Client talks to the OpenRouter video generation API.
+// Client is a thin facade over the official OpenRouter Go SDK, exposing only the
+// video-generation surface this app needs.
 type Client struct {
-	baseURL string
-	apiKey  string
-	http    *http.Client
+	sdk *orsdk.OpenRouter
 }
 
 // New builds a client. If proxyURL is non-empty, all OpenRouter traffic is
 // routed through that proxy (e.g. "http://user:pass@host:port") — useful when
 // the host region is blocked by OpenRouter's edge. timeout bounds a single
-// HTTP request; if zero a sane default is used.
+// HTTP attempt; if zero a sane default is used. Transient failures (dropped
+// proxy connections / 5xx) are retried by the SDK.
 func New(baseURL, apiKey, proxyURL string, timeout time.Duration) *Client {
 	if timeout <= 0 {
 		timeout = 120 * time.Second
@@ -41,39 +41,35 @@ func New(baseURL, apiKey, proxyURL string, timeout time.Duration) *Client {
 		}
 	}
 	httpClient := &http.Client{Timeout: timeout, Transport: transport}
-	return &Client{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		apiKey:  apiKey,
-		http:    httpClient,
+
+	opts := []orsdk.SDKOption{
+		orsdk.WithClient(httpClient),
+		orsdk.WithSecurity(apiKey),
+		// Retry dropped connections and 5xx with capped backoff (values in ms).
+		orsdk.WithRetryConfig(retry.Config{
+			Strategy: "backoff",
+			Backoff: &retry.BackoffStrategy{
+				InitialInterval: 2000,
+				MaxInterval:     15000,
+				Exponent:        1.5,
+				MaxElapsedTime:  180000,
+			},
+			RetryConnectionErrors: true,
+		}),
 	}
-}
-
-type frameImageURL struct {
-	URL string `json:"url"`
-}
-
-type frameImage struct {
-	ImageURL  frameImageURL `json:"image_url"`
-	Type      string        `json:"type"`       // always "image_url"
-	FrameType string        `json:"frame_type"` // "first_frame" | "last_frame"
-}
-
-type createVideoRequest struct {
-	Model        string       `json:"model"`
-	Prompt       string       `json:"prompt"`
-	FrameImages  []frameImage `json:"frame_images,omitempty"`
-	Duration     *int         `json:"duration,omitempty"`
-	Resolution   string       `json:"resolution,omitempty"`
-	AspectRatio  string       `json:"aspect_ratio,omitempty"`
+	if baseURL != "" {
+		opts = append(opts, orsdk.WithServerURL(strings.TrimRight(baseURL, "/")))
+	}
+	return &Client{sdk: orsdk.New(opts...)}
 }
 
 // VideoJob mirrors the relevant fields of a video generation job.
 type VideoJob struct {
-	ID           string   `json:"id"`
-	Status       string   `json:"status"`
-	PollingURL   string   `json:"polling_url"`
-	UnsignedURLs []string `json:"unsigned_urls"`
-	Error        string   `json:"error"`
+	ID           string
+	Status       string
+	PollingURL   string
+	UnsignedURLs []string
+	Error        string
 }
 
 // CreateVideoParams describes an image-to-video (or text-to-video) request.
@@ -88,27 +84,59 @@ type CreateVideoParams struct {
 
 // CreateVideo submits a video generation job.
 func (c *Client) CreateVideo(ctx context.Context, p CreateVideoParams) (*VideoJob, error) {
-	reqBody := createVideoRequest{
-		Model:       p.Model,
-		Prompt:      p.Prompt,
-		Duration:    p.Duration,
-		Resolution:  p.Resolution,
-		AspectRatio: p.AspectRatio,
+	req := components.VideoGenerationRequest{
+		Model:  p.Model,
+		Prompt: p.Prompt,
+	}
+	if p.Duration != nil {
+		d := int64(*p.Duration)
+		req.Duration = &d
+	}
+	if p.Resolution != "" {
+		r := components.Resolution(p.Resolution)
+		req.Resolution = &r
+	}
+	if p.AspectRatio != "" {
+		a := components.AspectRatio(p.AspectRatio)
+		req.AspectRatio = &a
 	}
 	if p.ImageURL != "" {
-		reqBody.FrameImages = []frameImage{{
-			ImageURL:  frameImageURL{URL: p.ImageURL},
-			Type:      "image_url",
-			FrameType: "first_frame",
+		req.FrameImages = []components.FrameImage{{
+			ImageURL:  components.FrameImageImageURL{URL: p.ImageURL},
+			Type:      components.FrameImageTypeImageURL,
+			FrameType: components.FrameTypeFirstFrame,
 		}}
 	}
-	body, _ := json.Marshal(reqBody)
-	return c.doRequest(ctx, http.MethodPost, c.baseURL+"/videos", body)
+	resp, err := c.sdk.VideoGeneration.Generate(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return toVideoJob(resp), nil
 }
 
 // GetVideo fetches the current state of a job for polling.
 func (c *Client) GetVideo(ctx context.Context, id string) (*VideoJob, error) {
-	return c.doRequest(ctx, http.MethodGet, c.baseURL+"/videos/"+id, nil)
+	resp, err := c.sdk.VideoGeneration.GetGeneration(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return toVideoJob(resp), nil
+}
+
+func toVideoJob(r *components.VideoGenerationResponse) *VideoJob {
+	if r == nil {
+		return nil
+	}
+	j := &VideoJob{
+		ID:           r.ID,
+		Status:       string(r.Status),
+		PollingURL:   r.PollingURL,
+		UnsignedURLs: r.UnsignedUrls,
+	}
+	if r.Error != nil {
+		j.Error = *r.Error
+	}
+	return j
 }
 
 // Model is a minimal view of a video generation model for the frontend.
@@ -122,91 +150,25 @@ type Model struct {
 
 // ListModels returns all available video generation models.
 func (c *Client) ListModels(ctx context.Context) ([]Model, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/videos/models", nil)
+	resp, err := c.sdk.VideoGeneration.ListVideosModels(ctx)
 	if err != nil {
 		return nil, err
 	}
-	c.setHeaders(req)
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("openrouter models: status %d: %s", resp.StatusCode, string(data))
-	}
-	var wrap struct {
-		Data []Model `json:"data"`
-	}
-	if err := json.Unmarshal(data, &wrap); err != nil {
-		return nil, fmt.Errorf("openrouter: decode models: %w", err)
-	}
-	return wrap.Data, nil
-}
-
-func (c *Client) setHeaders(req *http.Request) {
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-}
-
-// maxAttempts bounds how many times a request is retried on transient failures
-// (flaky proxy / dropped connections / 5xx / 429).
-const maxAttempts = 4
-
-// doRequest executes a request with retries on transient errors. body may be nil.
-func (c *Client) doRequest(ctx context.Context, method, urlStr string, body []byte) (*VideoJob, error) {
-	var lastErr error
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		var bodyReader io.Reader
-		if body != nil {
-			bodyReader = bytes.NewReader(body)
+	out := make([]Model, 0, len(resp.Data))
+	for _, m := range resp.Data {
+		mm := Model{ID: m.ID, Name: m.Name}
+		for _, r := range m.SupportedResolutions {
+			mm.SupportedResolutions = append(mm.SupportedResolutions, string(r))
 		}
-		req, err := http.NewRequestWithContext(ctx, method, urlStr, bodyReader)
-		if err != nil {
-			return nil, err
+		for _, a := range m.SupportedAspectRatios {
+			mm.SupportedAspectRatios = append(mm.SupportedAspectRatios, string(a))
 		}
-		c.setHeaders(req)
-
-		j, retryable, err := c.attempt(req)
-		if err == nil {
-			return j, nil
+		for _, d := range m.SupportedDurations {
+			mm.SupportedDurations = append(mm.SupportedDurations, int(d))
 		}
-		lastErr = err
-		if !retryable || attempt == maxAttempts || ctx.Err() != nil {
-			break
-		}
-		backoff := time.Duration(attempt) * 2 * time.Second
-		log.Printf("openrouter: %s %s attempt %d/%d failed: %v (retrying in %s)", method, req.URL.Path, attempt, maxAttempts, err, backoff)
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(backoff):
-		}
+		out = append(out, mm)
 	}
-	return nil, lastErr
-}
-
-// attempt performs a single HTTP call. The bool reports whether the error is
-// worth retrying.
-func (c *Client) attempt(req *http.Request) (*VideoJob, bool, error) {
-	resp, err := c.http.Do(req)
-	if err != nil {
-		// Network-level failures (EOF, reset, timeout, proxy drop) are transient.
-		return nil, true, err
-	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if resp.StatusCode >= 400 {
-		retryable := resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500
-		return nil, retryable, fmt.Errorf("openrouter %s: status %d: %s", req.URL.Path, resp.StatusCode, string(data))
-	}
-	var j VideoJob
-	if err := json.Unmarshal(data, &j); err != nil {
-		return nil, false, fmt.Errorf("openrouter: decode response: %w (body=%s)", err, string(data))
-	}
-	return &j, false, nil
+	return out, nil
 }
 
 // IsReady reports whether the job produced a downloadable video.
