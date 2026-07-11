@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -18,11 +20,24 @@ type Client struct {
 	http    *http.Client
 }
 
-func New(baseURL, apiKey string) *Client {
+// New builds a client. If proxyURL is non-empty, all OpenRouter traffic is
+// routed through that proxy (e.g. "http://user:pass@host:port") — useful when
+// the host region is blocked by OpenRouter's edge.
+func New(baseURL, apiKey, proxyURL string) *Client {
+	httpClient := &http.Client{Timeout: 60 * time.Second}
+	if proxyURL != "" {
+		p, err := url.Parse(proxyURL)
+		if err != nil {
+			log.Printf("openrouter: invalid OPENROUTER_PROXY_URL %q: %v (proxy disabled)", proxyURL, err)
+		} else {
+			httpClient.Transport = &http.Transport{Proxy: http.ProxyURL(p)}
+			log.Printf("openrouter: routing traffic through proxy %s", p.Host)
+		}
+	}
 	return &Client{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		apiKey:  apiKey,
-		http:    &http.Client{Timeout: 60 * time.Second},
+		http:    httpClient,
 	}
 }
 

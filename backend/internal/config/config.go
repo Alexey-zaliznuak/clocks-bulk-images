@@ -30,6 +30,7 @@ type Config struct {
 	OpenRouterAPIKey       string
 	OpenRouterBaseURL      string
 	OpenRouterDefaultModel string
+	OpenRouterProxyURL     string
 
 	WorkerConcurrency int
 	PollInterval      time.Duration
@@ -60,6 +61,7 @@ func Load() *Config {
 		OpenRouterAPIKey:       env("OPENROUTER_API_KEY", ""),
 		OpenRouterBaseURL:      env("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
 		OpenRouterDefaultModel: env("OPENROUTER_DEFAULT_MODEL", "google/veo-3.1"),
+		OpenRouterProxyURL:     env("OPENROUTER_PROXY_URL", ""),
 
 		WorkerConcurrency: envInt("WORKER_CONCURRENCY", 4),
 		PollInterval:      time.Duration(envInt("POLL_INTERVAL_SECONDS", 2)) * time.Second,
