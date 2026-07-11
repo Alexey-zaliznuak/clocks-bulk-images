@@ -54,6 +54,13 @@ export interface Task {
   batchId: string;
   firstName: string;
   lastName: string;
+  templateId: string;
+  imageSettings: Record<string, string>;
+  videoModel: string;
+  videoPrompt: string;
+  videoDuration?: number | null;
+  videoResolution: string;
+  videoAspectRatio: string;
   status: string;
   error: string;
   imageUrl: string;
@@ -120,6 +127,9 @@ export const api = {
   },
 
   listBatches: () => request<{ batches: Batch[]; usdRubRate: number }>("/api/batches"),
+
+  getBatch: (id: string) =>
+    request<{ batch: Batch; usdRubRate: number }>(`/api/batches/${id}`),
 
   deleteBatch: (id: string) =>
     request<{ deleted: string }>(`/api/batches/${id}`, { method: "DELETE" }),

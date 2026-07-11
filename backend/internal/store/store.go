@@ -255,6 +255,31 @@ func (s *Store) ListBatches(ctx context.Context, limit int) ([]*Batch, error) {
 	return out, rows.Err()
 }
 
+// GetBatch returns a single batch with aggregate counts and cost, or nil if
+// no batch with the given id exists.
+func (s *Store) GetBatch(ctx context.Context, id string) (*Batch, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT b.id, b.title, b.template_id, b.video_model, b.created_at,
+		       COUNT(t.id) AS total,
+		       COUNT(*) FILTER (WHERE t.status='done')   AS done,
+		       COUNT(*) FILTER (WHERE t.status='failed') AS failed,
+		       COALESCE(SUM(t.cost_usd), 0) AS cost_usd
+		FROM batches b
+		LEFT JOIN tasks t ON t.batch_id = b.id
+		WHERE b.id = $1
+		GROUP BY b.id`, id)
+	var b Batch
+	err := row.Scan(&b.ID, &b.Title, &b.TemplateID, &b.VideoModel, &b.CreatedAt,
+		&b.Total, &b.Done, &b.Failed, &b.CostUSD)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &b, nil
+}
+
 // BatchExists reports whether a batch with the given id exists.
 func (s *Store) BatchExists(ctx context.Context, id string) (bool, error) {
 	var exists bool

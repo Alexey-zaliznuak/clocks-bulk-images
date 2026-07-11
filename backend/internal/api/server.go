@@ -68,6 +68,7 @@ func (s *Server) Router() http.Handler {
 		pr.Post("/api/tasks/batch", s.handleCreateBatch)
 		pr.Get("/api/tasks", s.handleListTasks)
 		pr.Get("/api/batches", s.handleListBatches)
+		pr.Get("/api/batches/{id}", s.handleGetBatch)
 		pr.Delete("/api/batches/{id}", s.handleDeleteBatch)
 	})
 
@@ -254,6 +255,27 @@ func (s *Server) handleListBatches(w http.ResponseWriter, r *http.Request) {
 		b.CostRUB = b.CostUSD * rate
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"batches": batches, "usdRubRate": rate})
+}
+
+func (s *Server) handleGetBatch(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(chi.URLParam(r, "id"))
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "batch id is required")
+		return
+	}
+	b, err := s.store.GetBatch(r.Context(), id)
+	if err != nil {
+		log.Printf("api: get batch %s: %v", id, err)
+		writeError(w, http.StatusInternalServerError, "could not load batch")
+		return
+	}
+	if b == nil {
+		writeError(w, http.StatusNotFound, "batch not found")
+		return
+	}
+	rate := s.rater.Rate(r.Context())
+	b.CostRUB = b.CostUSD * rate
+	writeJSON(w, http.StatusOK, map[string]any{"batch": b, "usdRubRate": rate})
 }
 
 func (s *Server) handleDeleteBatch(w http.ResponseWriter, r *http.Request) {
