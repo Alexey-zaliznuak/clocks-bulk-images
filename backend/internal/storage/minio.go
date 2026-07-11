@@ -79,6 +79,21 @@ func (s *Storage) Upload(ctx context.Context, objectName string, r io.Reader, si
 	return nil
 }
 
+// RemovePrefix deletes every object whose key starts with the given prefix
+// (e.g. "<batchId>/"). Missing objects are not treated as an error.
+func (s *Storage) RemovePrefix(ctx context.Context, prefix string) error {
+	objects := s.client.ListObjects(ctx, s.bucket, minio.ListObjectsOptions{
+		Prefix:    prefix,
+		Recursive: true,
+	})
+	for rErr := range s.client.RemoveObjects(ctx, s.bucket, objects, minio.RemoveObjectsOptions{}) {
+		if rErr.Err != nil {
+			return fmt.Errorf("remove %s: %w", rErr.ObjectName, rErr.Err)
+		}
+	}
+	return nil
+}
+
 // PresignedURL returns a time-limited download URL resolvable by the browser.
 func (s *Storage) PresignedURL(ctx context.Context, objectName string, ttl time.Duration) (string, error) {
 	u, err := s.publicClient.PresignedGetObject(ctx, s.bucket, objectName, ttl, url.Values{})

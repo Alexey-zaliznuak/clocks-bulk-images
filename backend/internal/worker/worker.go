@@ -189,11 +189,19 @@ func (w *Worker) stageCreateVideo(ctx context.Context, t *store.Task) error {
 		return fmt.Errorf("openrouter job failed immediately: %s", job.Error)
 	}
 	if job.IsReady() {
+		recordCost(t, job)
 		t.Status = store.StatusVideoDownloading
 		return nil
 	}
 	t.Status = store.StatusVideoPolling
 	return nil
+}
+
+// recordCost stores the OpenRouter USD cost on the task when it becomes known.
+func recordCost(t *store.Task, job *openrouter.VideoJob) {
+	if job != nil && job.Cost != nil {
+		t.CostUSD = *job.Cost
+	}
 }
 
 // Stage 2b: poll the OpenRouter job until the video is ready.
@@ -216,6 +224,7 @@ func (w *Worker) stagePollVideo(ctx context.Context, t *store.Task) error {
 			return fmt.Errorf("openrouter job failed: status=%s %s", job.Status, job.Error)
 		}
 		if job.IsReady() {
+			recordCost(t, job)
 			t.Status = store.StatusVideoDownloading
 			return nil
 		}
@@ -233,6 +242,7 @@ func (w *Worker) stageDownload(ctx context.Context, t *store.Task) error {
 		t.Status = store.StatusVideoPolling
 		return nil
 	}
+	recordCost(t, job)
 
 	body, err := w.openrouter.DownloadVideo(ctx, t.OpenRouterJobID, 0)
 	if err != nil {

@@ -37,6 +37,10 @@ type Batch struct {
 	Total  int `json:"total"`
 	Done   int `json:"done"`
 	Failed int `json:"failed"`
+
+	// aggregate cost across all tasks in the batch
+	CostUSD float64 `json:"costUsd"`
+	CostRUB float64 `json:"costRub"`
 }
 
 type Task struct {
@@ -61,11 +65,16 @@ type Task struct {
 	OpenRouterJobID string `json:"openrouterJobId"`
 	VideoObject     string `json:"videoObject"`
 
+	// CostUSD is the OpenRouter video generation cost in USD (0 until known).
+	CostUSD float64 `json:"costUsd"`
+
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 
 	// VideoURL is a freshly generated presigned URL (not stored in DB).
 	VideoURL string `json:"videoUrl,omitempty"`
+	// CostRUB is derived from CostUSD and a live rate (not stored in DB).
+	CostRUB float64 `json:"costRub"`
 }
 
 type Store struct {
@@ -116,7 +125,7 @@ const taskColumns = `
 	id, batch_id, first_name, last_name, template_id, image_settings,
 	video_model, video_prompt, video_duration, video_resolution, video_aspect_ratio,
 	status, error, imanator_order_id, image_url, openrouter_job_id, video_object,
-	created_at, updated_at`
+	cost_usd, created_at, updated_at`
 
 func scanTask(row interface{ Scan(...any) error }) (*Task, error) {
 	var t Task
@@ -125,7 +134,7 @@ func scanTask(row interface{ Scan(...any) error }) (*Task, error) {
 		&t.ID, &t.BatchID, &t.FirstName, &t.LastName, &t.TemplateID, &settingsRaw,
 		&t.VideoModel, &t.VideoPrompt, &t.VideoDuration, &t.VideoResolution, &t.VideoAspectRatio,
 		&t.Status, &t.Error, &t.ImanatorOrderID, &t.ImageURL, &t.OpenRouterJobID, &t.VideoObject,
-		&t.CreatedAt, &t.UpdatedAt,
+		&t.CostUSD, &t.CreatedAt, &t.UpdatedAt,
 	); err != nil {
 		return nil, err
 	}
@@ -164,9 +173,9 @@ func (s *Store) Save(ctx context.Context, t *Task) error {
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE tasks SET
 			status=$2, error=$3, imanator_order_id=$4, image_url=$5,
-			openrouter_job_id=$6, video_object=$7, locked_at=now(), updated_at=now()
+			openrouter_job_id=$6, video_object=$7, cost_usd=$8, locked_at=now(), updated_at=now()
 		WHERE id=$1`,
-		t.ID, t.Status, t.Error, t.ImanatorOrderID, t.ImageURL, t.OpenRouterJobID, t.VideoObject,
+		t.ID, t.Status, t.Error, t.ImanatorOrderID, t.ImageURL, t.OpenRouterJobID, t.VideoObject, t.CostUSD,
 	)
 	return err
 }
@@ -222,7 +231,8 @@ func (s *Store) ListBatches(ctx context.Context, limit int) ([]*Batch, error) {
 		SELECT b.id, b.title, b.template_id, b.video_model, b.created_at,
 		       COUNT(t.id) AS total,
 		       COUNT(*) FILTER (WHERE t.status='done')   AS done,
-		       COUNT(*) FILTER (WHERE t.status='failed') AS failed
+		       COUNT(*) FILTER (WHERE t.status='failed') AS failed,
+		       COALESCE(SUM(t.cost_usd), 0) AS cost_usd
 		FROM batches b
 		LEFT JOIN tasks t ON t.batch_id = b.id
 		GROUP BY b.id
@@ -237,10 +247,23 @@ func (s *Store) ListBatches(ctx context.Context, limit int) ([]*Batch, error) {
 	for rows.Next() {
 		var b Batch
 		if err := rows.Scan(&b.ID, &b.Title, &b.TemplateID, &b.VideoModel, &b.CreatedAt,
-			&b.Total, &b.Done, &b.Failed); err != nil {
+			&b.Total, &b.Done, &b.Failed, &b.CostUSD); err != nil {
 			return nil, err
 		}
 		out = append(out, &b)
 	}
 	return out, rows.Err()
+}
+
+// BatchExists reports whether a batch with the given id exists.
+func (s *Store) BatchExists(ctx context.Context, id string) (bool, error) {
+	var exists bool
+	err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM batches WHERE id=$1)`, id).Scan(&exists)
+	return exists, err
+}
+
+// DeleteBatch removes a batch and (via ON DELETE CASCADE) all of its tasks.
+func (s *Store) DeleteBatch(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM batches WHERE id=$1`, id)
+	return err
 }

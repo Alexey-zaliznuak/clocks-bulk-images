@@ -13,17 +13,19 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
 function Layout({ children }: { children: ReactNode }) {
   const { logout } = useAuth();
   const linkClass = ({ isActive }: { isActive: boolean }) =>
-    `px-4 py-2 rounded-lg text-sm font-medium transition ${
-      isActive ? "bg-sky-500 text-white" : "text-slate-300 hover:bg-slate-800"
+    `px-4 py-2 rounded-full text-sm font-medium transition ${
+      isActive ? "bg-blue-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"
     }`;
 
   return (
-    <div className="min-h-full bg-slate-950 text-slate-100">
-      <header className="border-b border-slate-800 bg-slate-900/60 backdrop-blur sticky top-0 z-10">
+    <div className="min-h-full bg-slate-50 text-slate-800">
+      <header className="border-b border-slate-200 bg-white/80 backdrop-blur sticky top-0 z-10">
         <div className="mx-auto max-w-6xl px-4 py-3 flex items-center gap-3">
           <div className="flex items-center gap-2 mr-4">
-            <span className="text-xl">⏱️</span>
-            <span className="font-semibold tracking-tight">Named Clocks</span>
+            <span className="grid place-items-center w-9 h-9 rounded-2xl bg-blue-600 text-white text-lg shadow-sm">
+              ⏱️
+            </span>
+            <span className="font-bold tracking-tight text-slate-900">Named Clocks</span>
           </div>
           <nav className="flex gap-1">
             <NavLink to="/" end className={linkClass}>
@@ -35,7 +37,7 @@ function Layout({ children }: { children: ReactNode }) {
           </nav>
           <button
             onClick={logout}
-            className="ml-auto px-3 py-2 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-800 transition"
+            className="ml-auto px-3 py-2 rounded-full text-sm text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition"
           >
             Выйти
           </button>

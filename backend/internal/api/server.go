@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/cors"
 
 	"named_clocks/backend/internal/auth"
+	"named_clocks/backend/internal/currency"
 	"named_clocks/backend/internal/openrouter"
 	"named_clocks/backend/internal/storage"
 	"named_clocks/backend/internal/store"
@@ -24,6 +25,7 @@ type Server struct {
 	auth         *auth.Authenticator
 	openrouter   *openrouter.Client
 	storage      *storage.Storage
+	rater        *currency.Rater
 	defaultModel string
 	defaultPrompt string
 }
@@ -31,12 +33,13 @@ type Server struct {
 // DefaultVideoPrompt is the out-of-the-box prompt for animating the clock image.
 const DefaultVideoPrompt = "оживи картинку, рука должна плавно и естественно двигаться, показывая часы с разных сторон. Музыка спокойная, надписи на циферблате строго без искажений и изменений. Секундная стрелка двигается медленно реалистично, строго по часовой стороне."
 
-func NewServer(st *store.Store, a *auth.Authenticator, or *openrouter.Client, strg *storage.Storage, defaultModel string) *Server {
+func NewServer(st *store.Store, a *auth.Authenticator, or *openrouter.Client, strg *storage.Storage, rater *currency.Rater, defaultModel string) *Server {
 	return &Server{
 		store:         st,
 		auth:          a,
 		openrouter:    or,
 		storage:       strg,
+		rater:         rater,
 		defaultModel:  defaultModel,
 		defaultPrompt: DefaultVideoPrompt,
 	}
@@ -65,6 +68,7 @@ func (s *Server) Router() http.Handler {
 		pr.Post("/api/tasks/batch", s.handleCreateBatch)
 		pr.Get("/api/tasks", s.handleListTasks)
 		pr.Get("/api/batches", s.handleListBatches)
+		pr.Delete("/api/batches/{id}", s.handleDeleteBatch)
 	})
 
 	return r
@@ -220,8 +224,10 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not list tasks")
 		return
 	}
-	// attach presigned download URLs for finished videos
+	rate := s.rater.Rate(r.Context())
+	// attach presigned download URLs for finished videos + RUB cost
 	for _, t := range tasks {
+		t.CostRUB = t.CostUSD * rate
 		if t.VideoObject == "" {
 			continue
 		}
@@ -232,7 +238,7 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 		}
 		t.VideoURL = url
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"tasks": tasks})
+	writeJSON(w, http.StatusOK, map[string]any{"tasks": tasks, "usdRubRate": rate})
 }
 
 func (s *Server) handleListBatches(w http.ResponseWriter, r *http.Request) {
@@ -243,7 +249,39 @@ func (s *Server) handleListBatches(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not list batches")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"batches": batches})
+	rate := s.rater.Rate(r.Context())
+	for _, b := range batches {
+		b.CostRUB = b.CostUSD * rate
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"batches": batches, "usdRubRate": rate})
+}
+
+func (s *Server) handleDeleteBatch(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(chi.URLParam(r, "id"))
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "batch id is required")
+		return
+	}
+	exists, err := s.store.BatchExists(r.Context(), id)
+	if err != nil {
+		log.Printf("api: batch exists %s: %v", id, err)
+		writeError(w, http.StatusInternalServerError, "could not delete batch")
+		return
+	}
+	if !exists {
+		writeError(w, http.StatusNotFound, "batch not found")
+		return
+	}
+	// Best-effort removal of the stored videos for this batch.
+	if err := s.storage.RemovePrefix(r.Context(), id+"/"); err != nil {
+		log.Printf("api: remove objects for batch %s: %v", id, err)
+	}
+	if err := s.store.DeleteBatch(r.Context(), id); err != nil {
+		log.Printf("api: delete batch %s: %v", id, err)
+		writeError(w, http.StatusInternalServerError, "could not delete batch")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": id})
 }
 
 // ---------- helpers ----------

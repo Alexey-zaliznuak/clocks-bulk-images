@@ -36,6 +36,10 @@ type Config struct {
 	WorkerConcurrency int
 	PollInterval      time.Duration
 	StageTimeout      time.Duration
+
+	// UsdRubRate is the fallback USD→RUB rate used when the live feed is
+	// unavailable. A live rate is still preferred when reachable.
+	UsdRubRate float64
 }
 
 // Load reads configuration from the environment, applying sensible defaults.
@@ -68,6 +72,8 @@ func Load() *Config {
 		WorkerConcurrency: envInt("WORKER_CONCURRENCY", 4),
 		PollInterval:      time.Duration(envInt("POLL_INTERVAL_SECONDS", 2)) * time.Second,
 		StageTimeout:      time.Duration(envInt("STAGE_TIMEOUT_SECONDS", 600)) * time.Second,
+
+		UsdRubRate: envFloat("USD_RUB_RATE", 85),
 	}
 	return c
 }
@@ -85,6 +91,16 @@ func envInt(key string, def int) int {
 			return n
 		}
 		log.Printf("config: invalid int for %s=%q, using default %d", key, v, def)
+	}
+	return def
+}
+
+func envFloat(key string, def float64) float64 {
+	if v := os.Getenv(key); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			return f
+		}
+		log.Printf("config: invalid float for %s=%q, using default %g", key, v, def)
 	}
 	return def
 }

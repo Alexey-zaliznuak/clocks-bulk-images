@@ -12,6 +12,7 @@ import (
 	"named_clocks/backend/internal/api"
 	"named_clocks/backend/internal/auth"
 	"named_clocks/backend/internal/config"
+	"named_clocks/backend/internal/currency"
 	"named_clocks/backend/internal/db"
 	"named_clocks/backend/internal/imanator"
 	"named_clocks/backend/internal/openrouter"
@@ -64,7 +65,8 @@ func main() {
 
 	// --- HTTP API ---
 	authn := auth.New(cfg.AppLogin, cfg.AppPassword, cfg.JWTSecret)
-	srv := api.NewServer(st, authn, orClient, strg, cfg.OpenRouterDefaultModel)
+	rater := currency.New(cfg.UsdRubRate)
+	srv := api.NewServer(st, authn, orClient, strg, rater, cfg.OpenRouterDefaultModel)
 
 	httpServer := &http.Server{
 		Addr:              ":" + cfg.HTTPPort,

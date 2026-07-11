@@ -83,6 +83,8 @@ type VideoJob struct {
 	PollingURL   string
 	UnsignedURLs []string
 	Error        string
+	// Cost is the generation cost in USD, available once the job completes.
+	Cost *float64
 }
 
 // CreateVideoParams describes an image-to-video (or text-to-video) request.
@@ -172,6 +174,11 @@ func toVideoJob(r *components.VideoGenerationResponse) *VideoJob {
 	}
 	if r.Error != nil {
 		j.Error = *r.Error
+	}
+	if r.Usage != nil {
+		if v, ok := r.Usage.Cost.Get(); ok && v != nil {
+			j.Cost = v
+		}
 	}
 	return j
 }

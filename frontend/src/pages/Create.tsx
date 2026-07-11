@@ -124,8 +124,8 @@ export default function Create() {
       {/* left: form */}
       <section className="space-y-5">
         <div>
-          <h1 className="text-lg font-semibold mb-1">Новая пачка задач</h1>
-          <p className="text-sm text-slate-400">
+          <h1 className="text-xl font-bold text-slate-900 mb-1">Новая пачка задач ✨</h1>
+          <p className="text-sm text-slate-500">
             Каждая строка — одно ФИО. Для каждого будет: изображение в Иманаторе → видео в OpenRouter → сохранение в хранилище.
           </p>
         </div>
@@ -178,7 +178,7 @@ export default function Create() {
           />
         </Field>
 
-        <hr className="border-slate-800" />
+        <hr className="border-slate-200" />
 
         <Field label="Модель видео (OpenRouter)">
           {modelsError ? (
@@ -202,7 +202,7 @@ export default function Create() {
               ))}
             </select>
           )}
-          {modelsError && <p className="text-xs text-amber-400 mt-1">{modelsError}. Введите модель вручную.</p>}
+          {modelsError && <p className="text-xs text-amber-600 mt-1">{modelsError}. Введите модель вручную.</p>}
         </Field>
 
         <Field label="Промпт для видео">
@@ -241,7 +241,7 @@ export default function Create() {
         </div>
 
         {error && (
-          <div className="text-sm text-red-300 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
+          <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
             {error}
           </div>
         )}
@@ -249,7 +249,7 @@ export default function Create() {
         <button
           onClick={onSubmit}
           disabled={submitting}
-          className="w-full py-2.5 rounded-lg bg-sky-500 hover:bg-sky-400 disabled:opacity-50 font-medium transition"
+          className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold shadow-sm transition"
         >
           {submitting ? "Создаём…" : `Запустить ${parsed.length} задач`}
         </button>
@@ -258,7 +258,7 @@ export default function Create() {
       {/* right: live results */}
       <section className="space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Прогресс</h2>
+          <h2 className="text-xl font-bold text-slate-900">Прогресс</h2>
           {currentBatchId && (
             <span className="text-xs text-slate-500">
               {tasks.filter((t) => t.status === "done").length}/{tasks.length} готово
@@ -268,7 +268,7 @@ export default function Create() {
         {currentBatchId ? (
           <TaskTable tasks={tasks} />
         ) : (
-          <div className="rounded-xl border border-dashed border-slate-800 p-8 text-center text-slate-500 text-sm">
+          <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center text-slate-500 text-sm">
             Здесь появятся задачи и ссылки на результаты по мере готовности.
           </div>
         )}
@@ -278,12 +278,12 @@ export default function Create() {
 }
 
 const inputCls =
-  "w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 focus:border-sky-500 outline-none";
+  "w-full px-3 py-2 rounded-xl bg-white border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="block text-sm text-slate-400 mb-1">{label}</span>
+      <span className="block text-sm text-slate-500 mb-1">{label}</span>
       {children}
     </label>
   );

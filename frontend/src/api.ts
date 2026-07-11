@@ -59,6 +59,8 @@ export interface Task {
   imageUrl: string;
   videoUrl?: string;
   videoObject: string;
+  costUsd: number;
+  costRub: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -72,6 +74,8 @@ export interface Batch {
   total: number;
   done: number;
   failed: number;
+  costUsd: number;
+  costRub: number;
 }
 
 export interface CreateBatchPayload {
@@ -112,8 +116,11 @@ export const api = {
     const params = new URLSearchParams();
     if (batchId) params.set("batch_id", batchId);
     params.set("limit", String(limit));
-    return request<{ tasks: Task[] }>(`/api/tasks?${params.toString()}`);
+    return request<{ tasks: Task[]; usdRubRate: number }>(`/api/tasks?${params.toString()}`);
   },
 
-  listBatches: () => request<{ batches: Batch[] }>("/api/batches"),
+  listBatches: () => request<{ batches: Batch[]; usdRubRate: number }>("/api/batches"),
+
+  deleteBatch: (id: string) =>
+    request<{ deleted: string }>(`/api/batches/${id}`, { method: "DELETE" }),
 };

@@ -19,13 +19,13 @@ export function statusLabel(status: string): string {
 export function statusClasses(status: string): string {
   switch (status) {
     case "done":
-      return "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30";
+      return "bg-emerald-50 text-emerald-700 border border-emerald-200";
     case "failed":
-      return "bg-red-500/15 text-red-300 border border-red-500/30";
+      return "bg-red-50 text-red-700 border border-red-200";
     case "queued":
-      return "bg-slate-500/15 text-slate-300 border border-slate-500/30";
+      return "bg-slate-100 text-slate-600 border border-slate-200";
     default:
-      return "bg-sky-500/15 text-sky-300 border border-sky-500/30";
+      return "bg-blue-50 text-blue-700 border border-blue-200";
   }
 }
 
