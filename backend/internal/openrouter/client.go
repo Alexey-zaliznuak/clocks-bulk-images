@@ -28,16 +28,19 @@ func New(baseURL, apiKey, proxyURL string, timeout time.Duration) *Client {
 	if timeout <= 0 {
 		timeout = 120 * time.Second
 	}
-	httpClient := &http.Client{Timeout: timeout}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.TLSHandshakeTimeout = 30 * time.Second
+	transport.ResponseHeaderTimeout = timeout
 	if proxyURL != "" {
 		p, err := url.Parse(proxyURL)
 		if err != nil {
 			log.Printf("openrouter: invalid OPENROUTER_PROXY_URL %q: %v (proxy disabled)", proxyURL, err)
 		} else {
-			httpClient.Transport = &http.Transport{Proxy: http.ProxyURL(p)}
+			transport.Proxy = http.ProxyURL(p)
 			log.Printf("openrouter: routing traffic through proxy %s", p.Host)
 		}
 	}
+	httpClient := &http.Client{Timeout: timeout, Transport: transport}
 	return &Client{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		apiKey:  apiKey,
@@ -100,22 +103,12 @@ func (c *Client) CreateVideo(ctx context.Context, p CreateVideoParams) (*VideoJo
 		}}
 	}
 	body, _ := json.Marshal(reqBody)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/videos", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	c.setHeaders(req)
-	return c.do(req)
+	return c.doRequest(ctx, http.MethodPost, c.baseURL+"/videos", body)
 }
 
 // GetVideo fetches the current state of a job for polling.
 func (c *Client) GetVideo(ctx context.Context, id string) (*VideoJob, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/videos/"+id, nil)
-	if err != nil {
-		return nil, err
-	}
-	c.setHeaders(req)
-	return c.do(req)
+	return c.doRequest(ctx, http.MethodGet, c.baseURL+"/videos/"+id, nil)
 }
 
 // Model is a minimal view of a video generation model for the frontend.
@@ -158,21 +151,62 @@ func (c *Client) setHeaders(req *http.Request) {
 	req.Header.Set("Accept", "application/json")
 }
 
-func (c *Client) do(req *http.Request) (*VideoJob, error) {
+// maxAttempts bounds how many times a request is retried on transient failures
+// (flaky proxy / dropped connections / 5xx / 429).
+const maxAttempts = 4
+
+// doRequest executes a request with retries on transient errors. body may be nil.
+func (c *Client) doRequest(ctx context.Context, method, urlStr string, body []byte) (*VideoJob, error) {
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		var bodyReader io.Reader
+		if body != nil {
+			bodyReader = bytes.NewReader(body)
+		}
+		req, err := http.NewRequestWithContext(ctx, method, urlStr, bodyReader)
+		if err != nil {
+			return nil, err
+		}
+		c.setHeaders(req)
+
+		j, retryable, err := c.attempt(req)
+		if err == nil {
+			return j, nil
+		}
+		lastErr = err
+		if !retryable || attempt == maxAttempts || ctx.Err() != nil {
+			break
+		}
+		backoff := time.Duration(attempt) * 2 * time.Second
+		log.Printf("openrouter: %s %s attempt %d/%d failed: %v (retrying in %s)", method, req.URL.Path, attempt, maxAttempts, err, backoff)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(backoff):
+		}
+	}
+	return nil, lastErr
+}
+
+// attempt performs a single HTTP call. The bool reports whether the error is
+// worth retrying.
+func (c *Client) attempt(req *http.Request) (*VideoJob, bool, error) {
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, err
+		// Network-level failures (EOF, reset, timeout, proxy drop) are transient.
+		return nil, true, err
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("openrouter %s: status %d: %s", req.URL.Path, resp.StatusCode, string(data))
+		retryable := resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500
+		return nil, retryable, fmt.Errorf("openrouter %s: status %d: %s", req.URL.Path, resp.StatusCode, string(data))
 	}
 	var j VideoJob
 	if err := json.Unmarshal(data, &j); err != nil {
-		return nil, fmt.Errorf("openrouter: decode response: %w (body=%s)", err, string(data))
+		return nil, false, fmt.Errorf("openrouter: decode response: %w (body=%s)", err, string(data))
 	}
-	return &j, nil
+	return &j, false, nil
 }
 
 // IsReady reports whether the job produced a downloadable video.
