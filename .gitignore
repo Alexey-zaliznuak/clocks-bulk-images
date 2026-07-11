@@ -1,0 +1,24 @@
+# Env
+.env
+*.local
+
+# Go
+/backend/bin/
+/backend/server
+*.exe
+*.test
+*.out
+
+# Node
+node_modules/
+/frontend/dist/
+.vite/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.log
+
+# Docker volumes (if bind-mounted locally)
+/data/
