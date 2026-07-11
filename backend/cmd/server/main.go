@@ -56,7 +56,7 @@ func main() {
 
 	// --- External clients ---
 	imClient := imanator.New(cfg.ImanatorBaseURL, cfg.ImanatorAPIKey)
-	orClient := openrouter.New(cfg.OpenRouterBaseURL, cfg.OpenRouterAPIKey, cfg.OpenRouterProxyURL)
+	orClient := openrouter.New(cfg.OpenRouterBaseURL, cfg.OpenRouterAPIKey, cfg.OpenRouterProxyURL, cfg.OpenRouterTimeout)
 
 	// --- Worker pool ---
 	wk := worker.New(st, imClient, orClient, strg, cfg.WorkerConcurrency, cfg.PollInterval, cfg.StageTimeout)

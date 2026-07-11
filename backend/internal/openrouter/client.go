@@ -22,9 +22,13 @@ type Client struct {
 
 // New builds a client. If proxyURL is non-empty, all OpenRouter traffic is
 // routed through that proxy (e.g. "http://user:pass@host:port") — useful when
-// the host region is blocked by OpenRouter's edge.
-func New(baseURL, apiKey, proxyURL string) *Client {
-	httpClient := &http.Client{Timeout: 60 * time.Second}
+// the host region is blocked by OpenRouter's edge. timeout bounds a single
+// HTTP request; if zero a sane default is used.
+func New(baseURL, apiKey, proxyURL string, timeout time.Duration) *Client {
+	if timeout <= 0 {
+		timeout = 120 * time.Second
+	}
+	httpClient := &http.Client{Timeout: timeout}
 	if proxyURL != "" {
 		p, err := url.Parse(proxyURL)
 		if err != nil {
