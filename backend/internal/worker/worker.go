@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net/http"
 	"time"
 
 	"named_clocks/backend/internal/imanator"
@@ -25,8 +24,6 @@ type Worker struct {
 	concurrency  int
 	pollInterval time.Duration
 	stageTimeout time.Duration
-
-	downloadHTTP *http.Client
 }
 
 func New(
@@ -48,7 +45,6 @@ func New(
 		concurrency:  concurrency,
 		pollInterval: pollInterval,
 		stageTimeout: stageTimeout,
-		downloadHTTP: &http.Client{Timeout: 15 * time.Minute},
 	}
 }
 
@@ -237,23 +233,15 @@ func (w *Worker) stageDownload(ctx context.Context, t *store.Task) error {
 		t.Status = store.StatusVideoPolling
 		return nil
 	}
-	srcURL := job.VideoURL()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srcURL, nil)
-	if err != nil {
-		return err
-	}
-	resp, err := w.downloadHTTP.Do(req)
+	body, err := w.openrouter.DownloadVideo(ctx, t.OpenRouterJobID, 0)
 	if err != nil {
 		return fmt.Errorf("download video: %w", err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("download video: status %d", resp.StatusCode)
-	}
+	defer body.Close()
 
 	objectName := fmt.Sprintf("%s/%s.mp4", t.BatchID, t.ID)
-	if err := w.storage.Upload(ctx, objectName, resp.Body, -1, "video/mp4"); err != nil {
+	if err := w.storage.Upload(ctx, objectName, body, -1, "video/mp4"); err != nil {
 		return err
 	}
 	t.VideoObject = objectName

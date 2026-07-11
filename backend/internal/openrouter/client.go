@@ -2,6 +2,7 @@ package openrouter
 
 import (
 	"context"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -10,6 +11,7 @@ import (
 
 	orsdk "github.com/OpenRouterTeam/go-sdk"
 	"github.com/OpenRouterTeam/go-sdk/models/components"
+	"github.com/OpenRouterTeam/go-sdk/optionalnullable"
 	"github.com/OpenRouterTeam/go-sdk/retry"
 )
 
@@ -121,6 +123,14 @@ func (c *Client) GetVideo(ctx context.Context, id string) (*VideoJob, error) {
 		return nil, err
 	}
 	return toVideoJob(resp), nil
+}
+
+// DownloadVideo streams the finished video content through the SDK client. This
+// routes the download through the same proxy and adds auth, avoiding the 403s
+// that hit direct fetches of provider/content URLs from a blocked region.
+func (c *Client) DownloadVideo(ctx context.Context, jobID string, index int) (io.ReadCloser, error) {
+	i := int64(index)
+	return c.sdk.VideoGeneration.GetVideoContent(ctx, jobID, optionalnullable.From(&i))
 }
 
 func toVideoJob(r *components.VideoGenerationResponse) *VideoJob {
