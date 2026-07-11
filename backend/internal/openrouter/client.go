@@ -2,6 +2,7 @@ package openrouter
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -11,14 +12,16 @@ import (
 
 	orsdk "github.com/OpenRouterTeam/go-sdk"
 	"github.com/OpenRouterTeam/go-sdk/models/components"
-	"github.com/OpenRouterTeam/go-sdk/optionalnullable"
 	"github.com/OpenRouterTeam/go-sdk/retry"
 )
 
 // Client is a thin facade over the official OpenRouter Go SDK, exposing only the
 // video-generation surface this app needs.
 type Client struct {
-	sdk *orsdk.OpenRouter
+	sdk     *orsdk.OpenRouter
+	dlHTTP  *http.Client // shares the proxy transport, longer timeout for downloads
+	baseURL string
+	apiKey  string
 }
 
 // New builds a client. If proxyURL is non-empty, all OpenRouter traffic is
@@ -59,10 +62,18 @@ func New(baseURL, apiKey, proxyURL string, timeout time.Duration) *Client {
 			RetryConnectionErrors: true,
 		}),
 	}
-	if baseURL != "" {
-		opts = append(opts, orsdk.WithServerURL(strings.TrimRight(baseURL, "/")))
+	base := strings.TrimRight(baseURL, "/")
+	if base != "" {
+		opts = append(opts, orsdk.WithServerURL(base))
 	}
-	return &Client{sdk: orsdk.New(opts...)}
+	return &Client{
+		sdk: orsdk.New(opts...),
+		// Downloads reuse the proxy transport but need a generous timeout for
+		// large video files.
+		dlHTTP:  &http.Client{Timeout: 15 * time.Minute, Transport: transport},
+		baseURL: base,
+		apiKey:  apiKey,
+	}
 }
 
 // VideoJob mirrors the relevant fields of a video generation job.
@@ -125,12 +136,28 @@ func (c *Client) GetVideo(ctx context.Context, id string) (*VideoJob, error) {
 	return toVideoJob(resp), nil
 }
 
-// DownloadVideo streams the finished video content through the SDK client. This
-// routes the download through the same proxy and adds auth, avoiding the 403s
-// that hit direct fetches of provider/content URLs from a blocked region.
+// DownloadVideo streams the finished video content from the OpenRouter content
+// endpoint through the proxy, with auth. We fetch it manually (rather than via
+// the SDK) because the endpoint returns video/* content types and the SDK only
+// accepts application/octet-stream, otherwise dumping the whole body into an
+// error. The caller must close the returned reader.
 func (c *Client) DownloadVideo(ctx context.Context, jobID string, index int) (io.ReadCloser, error) {
-	i := int64(index)
-	return c.sdk.VideoGeneration.GetVideoContent(ctx, jobID, optionalnullable.From(&i))
+	u := fmt.Sprintf("%s/videos/%s/content?index=%d", c.baseURL, url.PathEscape(jobID), index)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	resp, err := c.dlHTTP.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 400 {
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		resp.Body.Close()
+		return nil, fmt.Errorf("status %d: %s", resp.StatusCode, string(data))
+	}
+	return resp.Body, nil
 }
 
 func toVideoJob(r *components.VideoGenerationResponse) *VideoJob {
