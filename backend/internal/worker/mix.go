@@ -28,6 +28,10 @@ func (w *Worker) stageMixAudio(ctx context.Context, t *store.Task) error {
 		return fmt.Errorf("ffmpeg is not available on this server")
 	}
 
+	// Interpolating a slow-down runs for minutes with nothing else touching the
+	// task, so the lease has to be held explicitly.
+	defer w.keepLeased(ctx, t.ID)()
+
 	dir, err := w.ffmpeg.NewTempDir("mix-")
 	if err != nil {
 		return transient(fmt.Errorf("create temp dir: %w", err))

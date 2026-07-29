@@ -61,12 +61,17 @@ func main() {
 	orClient := openrouter.New(cfg.OpenRouterBaseURL, cfg.OpenRouterAPIKey, cfg.OpenRouterProxyURL, cfg.OpenRouterTimeout)
 
 	// --- Media tooling ---
+	stretchMode, err := media.ParseStretchMode(cfg.MediaStretchMode)
+	if err != nil {
+		log.Printf("media: %v — using %q", err, stretchMode)
+	}
 	ff := media.New(media.Options{
 		Concurrency:      cfg.FFmpegConcurrency,
 		TempDir:          cfg.MediaTmpDir,
-		SmoothStretch:    cfg.MediaSmoothStretch,
+		StretchMode:      stretchMode,
 		MaxStretchFactor: cfg.MediaMaxStretchFactor,
 		OutputFPS:        cfg.MediaOutputFPS,
+		Timeout:          cfg.MediaFFmpegTimeout,
 	})
 	if err := ff.CheckTools(ctx); err != nil {
 		// Not fatal: generation without a soundtrack and the rest of the API keep

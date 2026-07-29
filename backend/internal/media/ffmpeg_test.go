@@ -35,6 +35,50 @@ func TestStretchArgsSlowsClipToSoundtrack(t *testing.T) {
 	if got := argValue(args, "-map"); got != "[v]" {
 		t.Fatalf("first -map = %q, want [v] (the retimed video)", got)
 	}
+	// The missing frames must be synthesised: duplicating them is what reads as
+	// a stutter on screen.
+	filter := argValue(args, "-filter_complex")
+	if !strings.Contains(filter, "minterpolate") {
+		t.Fatalf("expected interpolation by default, got filter %q", filter)
+	}
+	if !strings.Contains(filter, "scd=none") {
+		t.Fatalf("scene-change detection must be off or it falls back to duplication: %q", filter)
+	}
+}
+
+func TestStretchArgsCanDuplicateFramesInstead(t *testing.T) {
+	f := New(Options{OutputFPS: 30, MaxStretchFactor: 6, StretchMode: StretchDuplicate})
+
+	args, err := f.stretchArgs("in.mp4", "song.mp3", "out.mp4", 4, 8)
+	if err != nil {
+		t.Fatalf("stretchArgs: %v", err)
+	}
+	filter := argValue(args, "-filter_complex")
+	if strings.Contains(filter, "minterpolate") {
+		t.Fatalf("duplicate mode must not interpolate: %q", filter)
+	}
+	if !strings.Contains(filter, "fps=30") {
+		t.Fatalf("expected the plain fps filter, got %q", filter)
+	}
+}
+
+func TestParseStretchMode(t *testing.T) {
+	for _, in := range []string{"", "interpolate", "  Interpolate "} {
+		if got, err := ParseStretchMode(in); got != StretchInterpolate || err != nil {
+			t.Fatalf("ParseStretchMode(%q) = %q, %v", in, got, err)
+		}
+	}
+	if got, err := ParseStretchMode("duplicate"); got != StretchDuplicate || err != nil {
+		t.Fatalf("ParseStretchMode(duplicate) = %q, %v", got, err)
+	}
+	// An unusable value must not silently degrade quality.
+	got, err := ParseStretchMode("smooth")
+	if err == nil {
+		t.Fatal("expected an error for an unknown mode")
+	}
+	if got != StretchInterpolate {
+		t.Fatalf("fallback = %q, want %q", got, StretchInterpolate)
+	}
 }
 
 func TestStretchArgsSpeedsUpWhenAudioIsShorter(t *testing.T) {
@@ -74,14 +118,3 @@ func TestStretchArgsRejectsUnknownDurations(t *testing.T) {
 	}
 }
 
-func TestSmoothStretchUsesInterpolation(t *testing.T) {
-	f := New(Options{OutputFPS: 30, MaxStretchFactor: 6, SmoothStretch: true})
-
-	args, err := f.stretchArgs("in.mp4", "song.mp3", "out.mp4", 4, 8)
-	if err != nil {
-		t.Fatalf("stretchArgs: %v", err)
-	}
-	if filter := argValue(args, "-filter_complex"); !strings.Contains(filter, "minterpolate") {
-		t.Fatalf("expected minterpolate in filter %q", filter)
-	}
-}

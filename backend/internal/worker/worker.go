@@ -353,6 +353,10 @@ func (w *Worker) stagePollVideo(ctx context.Context, t *store.Task) error {
 // audio the clip is stored as the raw source for the mixing stage; otherwise it
 // is already the deliverable.
 func (w *Worker) stageDownload(ctx context.Context, t *store.Task) error {
+	// Moving a whole clip through the process can outlast the lease on a slow
+	// link, so keep renewing it while the bytes flow.
+	defer w.keepLeased(ctx, t.ID)()
+
 	// Fetch the (short-lived) source URL fresh so it works even after a restart.
 	job, err := w.openrouter.GetVideo(ctx, t.OpenRouterJobID)
 	if err != nil {
@@ -400,6 +404,38 @@ func (w *Worker) fail(ctx context.Context, t *store.Task, cause error) {
 		log.Printf("worker: save failed task %s: %v", t.ID, err)
 	}
 	_ = w.store.Release(ctx, t.ID)
+}
+
+// keepLeased renews the task lease in the background and returns the function
+// that stops it. Long local work (an interpolated render takes minutes) would
+// otherwise let the lease expire, and another worker would pick the same task up
+// and redo it in parallel.
+func (w *Worker) keepLeased(ctx context.Context, id string) func() {
+	interval := w.leaseTimeout / 3
+	if interval < time.Second {
+		interval = time.Second
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := w.store.Touch(ctx, id); err != nil && ctx.Err() == nil {
+					log.Printf("worker: renew lease for task %s: %v", id, err)
+				}
+			}
+		}
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
 }
 
 // sleepCtx sleeps for d unless the context is cancelled first.

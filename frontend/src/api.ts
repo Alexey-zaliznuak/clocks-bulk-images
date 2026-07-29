@@ -119,6 +119,7 @@ export interface Task {
   attempts: number;
   imageUrl: string;
   videoUrl?: string;
+  downloadUrl?: string;
   videoObject: string;
   costUsd: number;
   costRub: number;

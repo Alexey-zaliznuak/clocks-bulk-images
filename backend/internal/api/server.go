@@ -315,6 +315,13 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		t.VideoURL = url
+
+		dl, err := s.storage.PresignedDownloadURL(r.Context(), t.VideoObject, videoFileName(t), 24*time.Hour)
+		if err != nil {
+			log.Printf("api: presign download %s: %v", t.VideoObject, err)
+			continue
+		}
+		t.DownloadURL = dl
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"tasks": tasks, "usdRubRate": rate})
 }

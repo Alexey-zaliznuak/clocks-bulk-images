@@ -54,14 +54,18 @@ type Config struct {
 	FFmpegConcurrency int
 	// MediaTmpDir holds scratch files for uploads and encodes.
 	MediaTmpDir string
-	// MediaSmoothStretch interpolates frames when slowing a clip down: much
-	// smoother slow motion, much more CPU per clip.
-	MediaSmoothStretch bool
+	// MediaStretchMode is how a clip is retimed to the soundtrack length:
+	// "interpolate" synthesises the missing frames, "duplicate" holds the
+	// existing ones longer (cheap, but visibly stuttery).
+	MediaStretchMode string
 	// MediaMaxStretchFactor is the largest slow-down allowed when fitting a clip
 	// to a soundtrack.
 	MediaMaxStretchFactor float64
 	// MediaOutputFPS is the frame rate of the rendered videos.
 	MediaOutputFPS int
+	// MediaFFmpegTimeout bounds a single ffmpeg run. Interpolated renders take
+	// minutes, and proportionally longer on a small machine.
+	MediaFFmpegTimeout time.Duration
 	// MediaMaxAudioMB / MediaMaxVideoUploadMB bound the upload endpoints.
 	MediaMaxAudioMB       int64
 	MediaMaxVideoUploadMB int64
@@ -107,9 +111,10 @@ func Load() *Config {
 
 		FFmpegConcurrency:     envInt("FFMPEG_CONCURRENCY", 2),
 		MediaTmpDir:           env("MEDIA_TMP_DIR", ""),
-		MediaSmoothStretch:    envBool("MEDIA_SMOOTH_STRETCH", false),
+		MediaStretchMode:      env("MEDIA_STRETCH_MODE", "interpolate"),
 		MediaMaxStretchFactor: envFloat("MEDIA_MAX_STRETCH_FACTOR", 6),
 		MediaOutputFPS:        envInt("MEDIA_OUTPUT_FPS", 30),
+		MediaFFmpegTimeout:    time.Duration(envInt("MEDIA_FFMPEG_TIMEOUT_SECONDS", 1800)) * time.Second,
 		MediaMaxAudioMB:       int64(envInt("MEDIA_MAX_AUDIO_MB", 50)),
 		MediaMaxVideoUploadMB: int64(envInt("MEDIA_MAX_VIDEO_UPLOAD_MB", 500)),
 

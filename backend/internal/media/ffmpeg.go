@@ -16,6 +16,34 @@ import (
 	"time"
 )
 
+// StretchMode selects how frames are retimed when a clip is fitted onto a
+// soundtrack.
+type StretchMode string
+
+const (
+	// StretchInterpolate synthesises the frames a slow-down needs from the motion
+	// between the existing ones. Motion stays fluid at the price of a lot of CPU
+	// (tens of seconds per clip) and of occasional warping where the estimator
+	// guesses wrong.
+	StretchInterpolate StretchMode = "interpolate"
+	// StretchDuplicate simply holds each frame longer. Nearly free, but the
+	// repeated frames are plainly visible as a stutter.
+	StretchDuplicate StretchMode = "duplicate"
+)
+
+// ParseStretchMode validates a configured mode name, falling back to the
+// interpolating one and reporting why.
+func ParseStretchMode(s string) (StretchMode, error) {
+	switch StretchMode(strings.ToLower(strings.TrimSpace(s))) {
+	case StretchInterpolate, "":
+		return StretchInterpolate, nil
+	case StretchDuplicate:
+		return StretchDuplicate, nil
+	default:
+		return StretchInterpolate, fmt.Errorf("unknown stretch mode %q", s)
+	}
+}
+
 // Options configures the ffmpeg wrapper.
 type Options struct {
 	// Concurrency caps how many ffmpeg processes run at once. Encoding is CPU
@@ -23,10 +51,8 @@ type Options struct {
 	Concurrency int
 	// TempDir holds the scratch files. Empty means the OS default.
 	TempDir string
-	// SmoothStretch trades CPU for quality: instead of holding frames longer,
-	// missing frames are interpolated. Slow-motion looks fluid but a single clip
-	// can take tens of seconds to encode.
-	SmoothStretch bool
+	// StretchMode picks the retiming algorithm. The zero value interpolates.
+	StretchMode StretchMode
 	// MaxStretchFactor refuses absurd slow-downs (a 4s clip over a 60s track
 	// would be a slideshow, not a video).
 	MaxStretchFactor float64
@@ -46,6 +72,9 @@ type FFmpeg struct {
 func New(o Options) *FFmpeg {
 	if o.Concurrency < 1 {
 		o.Concurrency = 1
+	}
+	if o.StretchMode == "" {
+		o.StretchMode = StretchInterpolate
 	}
 	if o.MaxStretchFactor <= 0 {
 		o.MaxStretchFactor = 6
@@ -180,15 +209,19 @@ func (f *FFmpeg) stretchArgs(videoPath, audioPath, outPath string, videoDur, aud
 			audioDur, videoDur, factor, f.opts.MaxStretchFactor)
 	}
 
-	// setpts retimes the presentation stamps; fps then fills the timeline by
-	// holding frames. minterpolate instead synthesises the missing ones.
-	retime := fmt.Sprintf("[0:v]setpts=PTS*%.6f,fps=%d,format=yuv420p[v]", factor, f.opts.OutputFPS)
-	if f.opts.SmoothStretch {
-		retime = fmt.Sprintf(
-			"[0:v]setpts=PTS*%.6f,minterpolate=fps=%d:mi_mode=mci:mc_mode=aobmc:vsbmc=1,format=yuv420p[v]",
-			factor, f.opts.OutputFPS)
+	// setpts stretches the presentation stamps; the retimed stream then has to be
+	// filled up to OutputFPS, and how that is done is what the eye notices.
+	var retime string
+	if f.opts.StretchMode == StretchDuplicate {
+		retime = fmt.Sprintf("[0:v]setpts=PTS*%.6f,fps=%d,format=yuv420p[v]", factor, f.opts.OutputFPS)
+	} else {
+		retime = fmt.Sprintf("[0:v]setpts=PTS*%.6f,minterpolate=fps=%d:%s,format=yuv420p[v]",
+			factor, f.opts.OutputFPS, interpolateParams)
 	}
 
+	// A slow preset and a low crf are affordable here: the encode is already the
+	// cheap half of an interpolated render, and re-encoding is where the softness
+	// of the previous settings came from.
 	return []string{
 		"-nostdin", "-y",
 		"-i", videoPath,
@@ -196,7 +229,7 @@ func (f *FFmpeg) stretchArgs(videoPath, audioPath, outPath string, videoDur, aud
 		"-filter_complex", retime,
 		"-map", "[v]",
 		"-map", "1:a",
-		"-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+		"-c:v", "libx264", "-preset", "slow", "-crf", "18",
 		"-c:a", "aac", "-b:a", "192k", "-ar", "44100",
 		// Cut to the soundtrack so the result matches it exactly.
 		"-t", strconv.FormatFloat(audioDur, 'f', 3, 64),
@@ -204,6 +237,21 @@ func (f *FFmpeg) stretchArgs(videoPath, audioPath, outPath string, videoDur, aud
 		outPath,
 	}, nil
 }
+
+// interpolateParams tunes minterpolate for the least visible damage:
+//   - mci builds each new frame along the estimated motion instead of blending
+//     two frames together, which is what avoids ghosting;
+//   - aobmc plus vsbmc soften the block edges plain motion compensation leaves;
+//   - bidir estimates the motion from both surrounding frames;
+//   - scd=none disables scene-change detection, whose fallback is exactly the
+//     frame duplication we are trying to get away from — inside a single
+//     continuous shot it only ever fires by mistake, as an abrupt stutter.
+//
+// The remaining knobs are left at their defaults on purpose: measured against a
+// 48fps ground truth (halved to 24fps and rebuilt), a wider motion search
+// (me=umh, search_param=64) and finer blocks (mb_size=8) both scored *worse*
+// than the defaults while costing several times the CPU.
+const interpolateParams = "mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1:scd=none"
 
 // ExtractMP3 writes the audio track of a media file as an mp3.
 func (f *FFmpeg) ExtractMP3(ctx context.Context, inPath, outPath string) error {

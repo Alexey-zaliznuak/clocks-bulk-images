@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/minio/minio-go/v7"
@@ -148,4 +150,65 @@ func (s *Storage) PresignedURL(ctx context.Context, objectName string, ttl time.
 		return "", err
 	}
 	return u.String(), nil
+}
+
+// PresignedDownloadURL is PresignedURL plus a Content-Disposition override, so
+// the browser saves the object under filename instead of playing it in a tab.
+// The header has to come from the storage itself: the HTML download attribute is
+// ignored on cross-origin links.
+func (s *Storage) PresignedDownloadURL(ctx context.Context, objectName, filename string, ttl time.Duration) (string, error) {
+	params := url.Values{}
+	params.Set("response-content-disposition", contentDisposition(filename))
+	u, err := s.publicClient.PresignedGetObject(ctx, s.bucket, objectName, ttl, params)
+	if err != nil {
+		return "", err
+	}
+	return u.String(), nil
+}
+
+// contentDisposition encodes filename per RFC 6266. Header values must stay
+// ASCII, so a non-latin name travels percent-encoded in filename* and the plain
+// filename parameter is only a fallback for clients that ignore it.
+func contentDisposition(filename string) string {
+	return fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`,
+		asciiFallback(filename), percentEncode(filename))
+}
+
+// asciiFallback keeps the ASCII part of a name (dates, latin words) and falls
+// back to a generic name when nothing usable is left.
+func asciiFallback(filename string) string {
+	ext := keepASCII(filepath.Ext(filename))
+	base := keepASCII(strings.TrimSuffix(filename, filepath.Ext(filename)))
+	// Dropped characters leave gaps between the separators that survived.
+	for strings.Contains(base, "__") {
+		base = strings.ReplaceAll(base, "__", "_")
+	}
+	base = strings.Trim(base, "_-. ")
+	if base == "" {
+		base = "video"
+	}
+	return base + ext
+}
+
+func keepASCII(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r > 0x7e || r < 0x20 || r == '"' || r == '\\' {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+func percentEncode(s string) string {
+	var b strings.Builder
+	for _, c := range []byte(s) {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9',
+			c == '.', c == '_', c == '-':
+			b.WriteByte(c)
+		default:
+			fmt.Fprintf(&b, "%%%02X", c)
+		}
+	}
+	return b.String()
 }

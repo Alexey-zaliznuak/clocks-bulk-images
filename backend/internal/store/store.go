@@ -85,6 +85,8 @@ type Task struct {
 
 	// VideoURL is a freshly generated presigned URL (not stored in DB).
 	VideoURL string `json:"videoUrl,omitempty"`
+	// DownloadURL is the same object presigned with a "save as" disposition.
+	DownloadURL string `json:"downloadUrl,omitempty"`
 	// CostRUB is derived from CostUSD and a live rate (not stored in DB).
 	CostRUB float64 `json:"costRub"`
 }

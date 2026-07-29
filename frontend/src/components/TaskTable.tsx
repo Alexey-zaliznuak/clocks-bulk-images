@@ -114,14 +114,23 @@ export default function TaskTable({
                 </td>
                 <td className="px-4 py-2.5">
                   {t.videoUrl ? (
-                    <a
-                      href={t.videoUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1 text-emerald-600 hover:underline font-medium"
-                    >
-                      ▶ скачать
-                    </a>
+                    <div className="flex items-center gap-3 whitespace-nowrap">
+                      <a
+                        href={t.videoUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-emerald-600 hover:underline font-medium"
+                      >
+                        ▶ просмотр
+                      </a>
+                      <a
+                        href={t.downloadUrl || t.videoUrl}
+                        download
+                        className="text-blue-600 hover:underline"
+                      >
+                        ↓ скачать
+                      </a>
+                    </div>
                   ) : (
                     <span className="text-slate-400">—</span>
                   )}
