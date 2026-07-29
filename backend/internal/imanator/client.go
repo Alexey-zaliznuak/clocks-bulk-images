@@ -68,6 +68,18 @@ func (c *Client) setHeaders(req *http.Request) {
 	req.Header.Set("Accept", "application/json")
 }
 
+// HTTPError is a non-2xx response from the Imanator API. It carries the status
+// code so callers can tell a temporary outage (5xx) from a bad request.
+type HTTPError struct {
+	StatusCode int
+	Path       string
+	Body       string
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("imanator %s: status %d: %s", e.Path, e.StatusCode, e.Body)
+}
+
 func (c *Client) do(req *http.Request) (*Order, error) {
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -76,7 +88,7 @@ func (c *Client) do(req *http.Request) (*Order, error) {
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("imanator %s: status %d: %s", req.URL.Path, resp.StatusCode, string(data))
+		return nil, &HTTPError{StatusCode: resp.StatusCode, Path: req.URL.Path, Body: string(data)}
 	}
 	var o Order
 	if err := json.Unmarshal(data, &o); err != nil {

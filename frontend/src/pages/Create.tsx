@@ -1,13 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { api, type VideoModel } from "../api";
+import { Link, useNavigate } from "react-router-dom";
+import { api, type MediaAsset, type VideoModel } from "../api";
 import { loadSettings, parseNames, saveSettings, type UiSettings } from "../settings";
+import ConfirmDialog from "../components/ConfirmDialog";
+import { formatDuration } from "../format";
 
 export default function Create() {
   const navigate = useNavigate();
   const [settings, setSettings] = useState<UiSettings>(loadSettings);
   const [models, setModels] = useState<VideoModel[]>([]);
   const [modelsError, setModelsError] = useState("");
+  const [audio, setAudio] = useState<MediaAsset[]>([]);
+  const [audioError, setAudioError] = useState("");
+  const [audioWarnOpen, setAudioWarnOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -23,6 +28,7 @@ export default function Create() {
         ...s,
         videoPrompt: s.videoPrompt || cfg.defaultPrompt,
         videoModel: s.videoModel || cfg.defaultModel,
+        videoDuration: s.videoDuration || String(cfg.defaultDuration || ""),
       }));
     }).catch(() => {});
 
@@ -32,12 +38,34 @@ export default function Create() {
         setSettings((s) => ({ ...s, videoModel: s.videoModel || res.defaultModel }));
       })
       .catch((e) => setModelsError(e.message || "Не удалось загрузить модели"));
+
+    api.listAudio()
+      .then((res) => {
+        const assets = res.assets || [];
+        setAudio(assets);
+        // Drop a selection pointing at a file that no longer exists.
+        setSettings((s) =>
+          s.audioAssetId && !assets.some((a) => a.id === s.audioAssetId)
+            ? { ...s, audioAssetId: "" }
+            : s
+        );
+      })
+      .catch((e) => setAudioError(e.message || "Не удалось загрузить медиатеку"));
   }, []);
 
   const parsed = useMemo(() => parseNames(settings.namesText), [settings.namesText]);
 
   function update<K extends keyof UiSettings>(key: K, value: UiSettings[K]) {
     setSettings((s) => ({ ...s, [key]: value }));
+  }
+
+  // Turning model audio on is expensive, so it always goes through a warning.
+  function toggleGenerateAudio(next: boolean) {
+    if (next) {
+      setAudioWarnOpen(true);
+      return;
+    }
+    update("generateAudio", false);
   }
 
   async function onSubmit() {
@@ -48,6 +76,10 @@ export default function Create() {
     }
     if (parsed.length === 0) {
       setError("Список ФИО пуст");
+      return;
+    }
+    if (!settings.generateAudio && !settings.audioAssetId) {
+      setError("Выберите mp3 для озвучки — видео генерируется без звука");
       return;
     }
     let extraSettings: Record<string, string> = {};
@@ -73,6 +105,8 @@ export default function Create() {
         videoDuration: duration,
         videoResolution: settings.videoResolution,
         videoAspectRatio: settings.videoAspectRatio,
+        generateAudio: settings.generateAudio,
+        audioAssetId: settings.generateAudio ? "" : settings.audioAssetId,
         extraSettings,
         firstNameKey: settings.firstNameKey,
         lastNameKey: settings.lastNameKey,
@@ -88,6 +122,25 @@ export default function Create() {
   }
 
   const selectedModel = models.find((m) => m.id === settings.videoModel);
+  const selectedAudio = audio.find((a) => a.id === settings.audioAssetId);
+
+  // Warn up front when the chosen track would stretch the clip a lot: the
+  // backend refuses anything past its limit.
+  const stretchNote = useMemo(() => {
+    const clip = parseInt(settings.videoDuration, 10);
+    if (!selectedAudio || !clip || clip <= 0) return "";
+    const factor = selectedAudio.durationSeconds / clip;
+    if (factor > 6) {
+      return `замедление в ${factor.toFixed(1)} раза, сервер такое отклонит (лимит 6x)`;
+    }
+    if (factor > 2.5) {
+      return `замедление в ${factor.toFixed(1)} раза, движение станет заметно рваным`;
+    }
+    if (factor < 1) {
+      return `ускорение в ${(1 / factor).toFixed(1)} раза`;
+    }
+    return `замедление в ${factor.toFixed(1)} раза`;
+  }, [selectedAudio, settings.videoDuration]);
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -155,7 +208,7 @@ export default function Create() {
               className={inputCls}
               value={settings.videoModel}
               onChange={(e) => update("videoModel", e.target.value)}
-              placeholder="google/veo-3.1"
+              placeholder="google/veo-3.1-lite"
             />
           ) : (
             <select
@@ -209,6 +262,65 @@ export default function Create() {
           </Field>
         </div>
 
+        <hr className="border-slate-200" />
+
+        <div className="space-y-3">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800">Звук</h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Модель генерирует видео без звука — музыка накладывается после, а видео
+              подгоняется точно под длительность выбранного mp3.
+            </p>
+          </div>
+
+          <Field label="Музыка (mp3 из медиатеки)">
+            <select
+              className={inputCls}
+              value={settings.audioAssetId}
+              onChange={(e) => update("audioAssetId", e.target.value)}
+              disabled={settings.generateAudio}
+            >
+              <option value="">— не выбрано —</option>
+              {audio.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.title || a.filename} ({formatDuration(a.durationSeconds)})
+                </option>
+              ))}
+            </select>
+            {audioError && <p className="text-xs text-amber-600 mt-1">{audioError}</p>}
+            {!audioError && audio.length === 0 && (
+              <p className="text-xs text-amber-600 mt-1">
+                Медиатека пуста —{" "}
+                <Link to="/media" className="text-blue-600 hover:underline">
+                  загрузите mp3
+                </Link>
+                .
+              </p>
+            )}
+            {selectedAudio && (
+              <p className="text-xs text-slate-500 mt-1">
+                Итоговое видео будет длиться {formatDuration(selectedAudio.durationSeconds)}
+                {stretchNote && ` — ${stretchNote}`}
+              </p>
+            )}
+          </Field>
+
+          <label className="flex items-start gap-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-200"
+              checked={settings.generateAudio}
+              onChange={(e) => toggleGenerateAudio(e.target.checked)}
+            />
+            <span className="text-sm text-slate-700">
+              Генерировать аудио моделью
+              <span className="block text-xs text-slate-500">
+                Существенно дороже, музыка из медиатеки не накладывается.
+              </span>
+            </span>
+          </label>
+        </div>
+
         {error && (
           <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
             {error}
@@ -223,6 +335,27 @@ export default function Create() {
           {submitting ? "Создаём…" : `Запустить ${parsed.length} задач`}
         </button>
       </section>
+
+      <ConfirmDialog
+        open={audioWarnOpen}
+        title="Включить генерацию аудио моделью?"
+        confirmLabel="Всё равно включить"
+        onCancel={() => setAudioWarnOpen(false)}
+        onConfirm={() => {
+          update("generateAudio", true);
+          setAudioWarnOpen(false);
+        }}
+      >
+        <p>
+          Видео со звуком от модели стоит существенно дороже, чем без него — цена
+          вырастет на каждой задаче пачки.
+        </p>
+        <p>
+          Обычный путь дешевле: модель отдаёт короткий клип без звука, а музыка из
+          медиатеки накладывается уже на нашей стороне. Включайте это только если
+          нужен именно сгенерированный звук.
+        </p>
+      </ConfirmDialog>
     </div>
   );
 }

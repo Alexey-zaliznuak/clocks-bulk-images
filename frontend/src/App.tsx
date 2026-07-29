@@ -4,6 +4,8 @@ import Login from "./pages/Login";
 import Create from "./pages/Create";
 import History from "./pages/History";
 import BatchPage from "./pages/Batch";
+import Media from "./pages/Media";
+import Mp4ToMp3 from "./pages/Mp4ToMp3";
 import type { ReactNode } from "react";
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
@@ -34,6 +36,12 @@ function Layout({ children }: { children: ReactNode }) {
             </NavLink>
             <NavLink to="/history" className={linkClass}>
               История
+            </NavLink>
+            <NavLink to="/media" className={linkClass}>
+              Медиа
+            </NavLink>
+            <NavLink to="/mp4-to-mp3" className={linkClass}>
+              MP4 → MP3
             </NavLink>
           </nav>
           <button
@@ -79,6 +87,26 @@ export default function App() {
           <ProtectedRoute>
             <Layout>
               <BatchPage />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/media"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <Media />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/mp4-to-mp3"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <Mp4ToMp3 />
             </Layout>
           </ProtectedRoute>
         }

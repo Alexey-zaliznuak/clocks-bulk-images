@@ -95,13 +95,18 @@ type CreateVideoParams struct {
 	Duration    *int
 	Resolution  string
 	AspectRatio string
+	// GenerateAudio is always sent explicitly: OpenRouter defaults it to true for
+	// models capable of audio, which costs noticeably more.
+	GenerateAudio bool
 }
 
 // CreateVideo submits a video generation job.
 func (c *Client) CreateVideo(ctx context.Context, p CreateVideoParams) (*VideoJob, error) {
+	generateAudio := p.GenerateAudio
 	req := components.VideoGenerationRequest{
-		Model:  p.Model,
-		Prompt: p.Prompt,
+		Model:         p.Model,
+		Prompt:        p.Prompt,
+		GenerateAudio: &generateAudio,
 	}
 	if p.Duration != nil {
 		d := int64(*p.Duration)
@@ -157,9 +162,20 @@ func (c *Client) DownloadVideo(ctx context.Context, jobID string, index int) (io
 	if resp.StatusCode >= 400 {
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 		resp.Body.Close()
-		return nil, fmt.Errorf("status %d: %s", resp.StatusCode, string(data))
+		return nil, &HTTPError{StatusCode: resp.StatusCode, Body: string(data)}
 	}
 	return resp.Body, nil
+}
+
+// HTTPError is a non-2xx response from a raw (non-SDK) OpenRouter call. It keeps
+// the status code so temporary failures can be told apart from permanent ones.
+type HTTPError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("status %d: %s", e.StatusCode, e.Body)
 }
 
 func toVideoJob(r *components.VideoGenerationResponse) *VideoJob {

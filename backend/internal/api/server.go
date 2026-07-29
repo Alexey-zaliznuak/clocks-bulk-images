@@ -15,33 +15,66 @@ import (
 
 	"named_clocks/backend/internal/auth"
 	"named_clocks/backend/internal/currency"
+	"named_clocks/backend/internal/media"
 	"named_clocks/backend/internal/openrouter"
 	"named_clocks/backend/internal/storage"
 	"named_clocks/backend/internal/store"
 )
 
 type Server struct {
-	store        *store.Store
-	auth         *auth.Authenticator
-	openrouter   *openrouter.Client
-	storage      *storage.Storage
-	rater        *currency.Rater
-	defaultModel string
-	defaultPrompt string
+	store           *store.Store
+	auth            *auth.Authenticator
+	openrouter      *openrouter.Client
+	storage         *storage.Storage
+	ffmpeg          *media.FFmpeg
+	rater           *currency.Rater
+	defaultModel    string
+	defaultDuration int
+	defaultPrompt   string
+	maxAudioMB      int64
+	maxVideoMB      int64
+}
+
+// Options carries the server's tunables.
+type Options struct {
+	DefaultModel    string
+	DefaultDuration int
+	MaxAudioMB      int64
+	MaxVideoMB      int64
 }
 
 // DefaultVideoPrompt is the out-of-the-box prompt for animating the clock image.
-const DefaultVideoPrompt = "оживи картинку, рука должна плавно и естественно двигаться, показывая часы с разных сторон. Музыка спокойная, надписи на циферблате строго без искажений и изменений. Секундная стрелка двигается медленно реалистично, строго по часовой стороне."
+// The soundtrack is added later from the media library, so the model is asked for
+// silent footage only.
+const DefaultVideoPrompt = "оживи картинку, рука должна плавно и естественно двигаться, показывая часы с разных сторон. Надписи на циферблате строго без искажений и изменений. Секундная стрелка двигается медленно реалистично, строго по часовой стороне."
 
-func NewServer(st *store.Store, a *auth.Authenticator, or *openrouter.Client, strg *storage.Storage, rater *currency.Rater, defaultModel string) *Server {
+func NewServer(
+	st *store.Store,
+	a *auth.Authenticator,
+	or *openrouter.Client,
+	strg *storage.Storage,
+	ff *media.FFmpeg,
+	rater *currency.Rater,
+	o Options,
+) *Server {
+	if o.MaxAudioMB <= 0 {
+		o.MaxAudioMB = 50
+	}
+	if o.MaxVideoMB <= 0 {
+		o.MaxVideoMB = 500
+	}
 	return &Server{
-		store:         st,
-		auth:          a,
-		openrouter:    or,
-		storage:       strg,
-		rater:         rater,
-		defaultModel:  defaultModel,
-		defaultPrompt: DefaultVideoPrompt,
+		store:           st,
+		auth:            a,
+		openrouter:      or,
+		storage:         strg,
+		ffmpeg:          ff,
+		rater:           rater,
+		defaultModel:    o.DefaultModel,
+		defaultDuration: o.DefaultDuration,
+		defaultPrompt:   DefaultVideoPrompt,
+		maxAudioMB:      o.MaxAudioMB,
+		maxVideoMB:      o.MaxVideoMB,
 	}
 }
 
@@ -67,9 +100,16 @@ func (s *Server) Router() http.Handler {
 		pr.Get("/api/models", s.handleModels)
 		pr.Post("/api/tasks/batch", s.handleCreateBatch)
 		pr.Get("/api/tasks", s.handleListTasks)
+		pr.Post("/api/tasks/{id}/retry", s.handleRetryTask)
 		pr.Get("/api/batches", s.handleListBatches)
 		pr.Get("/api/batches/{id}", s.handleGetBatch)
+		pr.Post("/api/batches/{id}/retry", s.handleRetryBatch)
 		pr.Delete("/api/batches/{id}", s.handleDeleteBatch)
+
+		pr.Get("/api/media/audio", s.handleListAudio)
+		pr.Post("/api/media/audio", s.handleUploadAudio)
+		pr.Delete("/api/media/audio/{id}", s.handleDeleteAudio)
+		pr.Post("/api/media/extract-audio", s.handleExtractAudio)
 	})
 
 	return r
@@ -102,8 +142,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"defaultModel":  s.defaultModel,
-		"defaultPrompt": s.defaultPrompt,
+		"defaultModel":    s.defaultModel,
+		"defaultDuration": s.defaultDuration,
+		"defaultPrompt":   s.defaultPrompt,
 	})
 }
 
@@ -135,11 +176,15 @@ type createBatchRequest struct {
 	VideoDuration    *int              `json:"videoDuration"`
 	VideoResolution  string            `json:"videoResolution"`
 	VideoAspectRatio string            `json:"videoAspectRatio"`
-	ExtraSettings    map[string]string `json:"extraSettings"`
-	FirstNameKey     string            `json:"firstNameKey"`
-	LastNameKey      string            `json:"lastNameKey"`
-	FullNameKey      string            `json:"fullNameKey"`
-	Names            []nameInput       `json:"names"`
+	// GenerateAudio asks the model for a soundtrack instead of muxing one from
+	// the media library. Off by default because it costs noticeably more.
+	GenerateAudio bool              `json:"generateAudio"`
+	AudioAssetID  string            `json:"audioAssetId"`
+	ExtraSettings map[string]string `json:"extraSettings"`
+	FirstNameKey  string            `json:"firstNameKey"`
+	LastNameKey   string            `json:"lastNameKey"`
+	FullNameKey   string            `json:"fullNameKey"`
+	Names         []nameInput       `json:"names"`
 }
 
 func (s *Server) handleCreateBatch(w http.ResponseWriter, r *http.Request) {
@@ -163,6 +208,35 @@ func (s *Server) handleCreateBatch(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(req.VideoPrompt) == "" {
 		req.VideoPrompt = s.defaultPrompt
 	}
+	if req.VideoDuration == nil && s.defaultDuration > 0 {
+		d := s.defaultDuration
+		req.VideoDuration = &d
+	}
+
+	// Without model audio the clip comes back silent, so a soundtrack from the
+	// media library is required — otherwise there is nothing to fit it to.
+	audioObject := ""
+	if req.GenerateAudio {
+		req.AudioAssetID = ""
+	} else {
+		req.AudioAssetID = strings.TrimSpace(req.AudioAssetID)
+		if req.AudioAssetID == "" {
+			writeError(w, http.StatusBadRequest, "выберите mp3 для озвучки или включите генерацию аудио моделью")
+			return
+		}
+		asset, err := s.store.GetMediaAsset(r.Context(), req.AudioAssetID)
+		if err != nil {
+			log.Printf("api: get media asset %s: %v", req.AudioAssetID, err)
+			writeError(w, http.StatusInternalServerError, "could not load audio")
+			return
+		}
+		if asset == nil {
+			writeError(w, http.StatusBadRequest, "выбранный mp3 не найден")
+			return
+		}
+		audioObject = asset.Object
+	}
+
 	// sensible defaults for placeholder keys
 	firstKey := orDefault(req.FirstNameKey, "firstName")
 	lastKey := orDefault(req.LastNameKey, "lastName")
@@ -198,6 +272,9 @@ func (s *Server) handleCreateBatch(w http.ResponseWriter, r *http.Request) {
 			VideoDuration:    req.VideoDuration,
 			VideoResolution:  req.VideoResolution,
 			VideoAspectRatio: req.VideoAspectRatio,
+			GenerateAudio:    req.GenerateAudio,
+			AudioAssetID:     req.AudioAssetID,
+			AudioObject:      audioObject,
 		})
 	}
 	if len(tasks) == 0 {
@@ -240,6 +317,44 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 		t.VideoURL = url
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"tasks": tasks, "usdRubRate": rate})
+}
+
+// handleRetryTask puts one failed task back into the pipeline. It resumes from
+// the furthest artifact already produced, so an existing OpenRouter job is polled
+// again rather than paid for twice.
+func (s *Server) handleRetryTask(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(chi.URLParam(r, "id"))
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "task id is required")
+		return
+	}
+	status, err := s.store.RetryTask(r.Context(), id)
+	if err != nil {
+		log.Printf("api: retry task %s: %v", id, err)
+		writeError(w, http.StatusInternalServerError, "could not retry task")
+		return
+	}
+	if status == "" {
+		writeError(w, http.StatusConflict, "task not found or not in a failed state")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"id": id, "status": status})
+}
+
+// handleRetryBatch re-queues every failed task of a batch.
+func (s *Server) handleRetryBatch(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(chi.URLParam(r, "id"))
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "batch id is required")
+		return
+	}
+	n, err := s.store.RetryFailedInBatch(r.Context(), id)
+	if err != nil {
+		log.Printf("api: retry batch %s: %v", id, err)
+		writeError(w, http.StatusInternalServerError, "could not retry batch")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"retried": n})
 }
 
 func (s *Server) handleListBatches(w http.ResponseWriter, r *http.Request) {

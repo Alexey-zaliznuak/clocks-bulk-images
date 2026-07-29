@@ -39,6 +39,56 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return data as T;
 }
 
+// Multipart uploads must not set Content-Type: the browser adds the boundary.
+async function upload<T>(path: string, form: FormData): Promise<T> {
+  const headers = new Headers();
+  const token = getToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+
+  const res = await fetch(path, { method: "POST", body: form, headers });
+  if (res.status === 401) {
+    clearToken();
+    throw new ApiError(401, "Не авторизован");
+  }
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : {};
+  if (!res.ok) {
+    throw new ApiError(res.status, data.error || `Ошибка ${res.status}`);
+  }
+  return data as T;
+}
+
+// uploadForBlob posts a file and returns the binary response (plus a suggested
+// filename), used by the mp4 → mp3 converter.
+async function uploadForBlob(
+  path: string,
+  form: FormData
+): Promise<{ blob: Blob; filename: string }> {
+  const headers = new Headers();
+  const token = getToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+
+  const res = await fetch(path, { method: "POST", body: form, headers });
+  if (res.status === 401) {
+    clearToken();
+    throw new ApiError(401, "Не авторизован");
+  }
+  if (!res.ok) {
+    const text = await res.text();
+    let message = `Ошибка ${res.status}`;
+    try {
+      message = JSON.parse(text).error || message;
+    } catch {
+      // non-JSON error body — keep the generic message
+    }
+    throw new ApiError(res.status, message);
+  }
+  return {
+    blob: await res.blob(),
+    filename: res.headers.get("X-Filename") || "audio.mp3",
+  };
+}
+
 // ---------- types ----------
 
 export interface VideoModel {
@@ -61,8 +111,12 @@ export interface Task {
   videoDuration?: number | null;
   videoResolution: string;
   videoAspectRatio: string;
+  generateAudio: boolean;
+  audioAssetId?: string;
+  audioObject?: string;
   status: string;
   error: string;
+  attempts: number;
   imageUrl: string;
   videoUrl?: string;
   videoObject: string;
@@ -85,6 +139,20 @@ export interface Batch {
   costRub: number;
 }
 
+export interface MediaAsset {
+  id: string;
+  kind: string;
+  title: string;
+  filename: string;
+  object: string;
+  contentType: string;
+  sizeBytes: number;
+  durationSeconds: number;
+  createdAt: string;
+  updatedAt: string;
+  url?: string;
+}
+
 export interface CreateBatchPayload {
   title: string;
   templateId: string;
@@ -93,6 +161,8 @@ export interface CreateBatchPayload {
   videoDuration?: number | null;
   videoResolution?: string;
   videoAspectRatio?: string;
+  generateAudio: boolean;
+  audioAssetId?: string;
   extraSettings: Record<string, string>;
   firstNameKey: string;
   lastNameKey: string;
@@ -109,7 +179,10 @@ export const api = {
       body: JSON.stringify({ login, password }),
     }),
 
-  config: () => request<{ defaultModel: string; defaultPrompt: string }>("/api/config"),
+  config: () =>
+    request<{ defaultModel: string; defaultDuration: number; defaultPrompt: string }>(
+      "/api/config"
+    ),
 
   models: () => request<{ models: VideoModel[]; defaultModel: string }>("/api/models"),
 
@@ -126,6 +199,12 @@ export const api = {
     return request<{ tasks: Task[]; usdRubRate: number }>(`/api/tasks?${params.toString()}`);
   },
 
+  retryTask: (id: string) =>
+    request<{ id: string; status: string }>(`/api/tasks/${id}/retry`, { method: "POST" }),
+
+  retryBatch: (id: string) =>
+    request<{ retried: number }>(`/api/batches/${id}/retry`, { method: "POST" }),
+
   listBatches: () => request<{ batches: Batch[]; usdRubRate: number }>("/api/batches"),
 
   getBatch: (id: string) =>
@@ -133,4 +212,22 @@ export const api = {
 
   deleteBatch: (id: string) =>
     request<{ deleted: string }>(`/api/batches/${id}`, { method: "DELETE" }),
+
+  listAudio: () => request<{ assets: MediaAsset[] }>("/api/media/audio"),
+
+  uploadAudio: (file: File, title?: string) => {
+    const form = new FormData();
+    form.append("file", file);
+    if (title) form.append("title", title);
+    return upload<{ asset: MediaAsset }>("/api/media/audio", form);
+  },
+
+  deleteAudio: (id: string) =>
+    request<{ deleted: string }>(`/api/media/audio/${id}`, { method: "DELETE" }),
+
+  extractAudio: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return uploadForBlob("/api/media/extract-audio", form);
+  },
 };

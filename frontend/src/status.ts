@@ -8,6 +8,7 @@ export const STATUS_LABELS: Record<string, string> = {
   video_creating: "Создаём видео",
   video_polling: "Ждём видео",
   video_downloading: "Сохраняем видео",
+  audio_mixing: "Подгоняем под музыку",
   done: "Готово",
   failed: "Ошибка",
 };

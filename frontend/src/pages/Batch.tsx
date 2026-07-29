@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, type Batch, type Task } from "../api";
+import { api, type Batch, type MediaAsset, type Task } from "../api";
 import { isActive } from "../status";
-import { formatRub, formatUsd } from "../format";
+import { formatDuration, formatRub, formatUsd } from "../format";
 import TaskTable from "../components/TaskTable";
 
 export default function BatchPage() {
@@ -11,9 +11,13 @@ export default function BatchPage() {
 
   const [batch, setBatch] = useState<Batch | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [audioAssets, setAudioAssets] = useState<MediaAsset[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [deleting, setDeleting] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  // Bumped after a retry so the polling effect restarts.
+  const [refreshKey, setRefreshKey] = useState(0);
   const pollRef = useRef<number | null>(null);
 
   function stopPolling() {
@@ -31,6 +35,13 @@ export default function BatchPage() {
       setError(e instanceof Error ? e.message : "Не удалось загрузить пачку");
     }
   }
+
+  // Loaded once to show the soundtrack by name instead of its storage key.
+  useEffect(() => {
+    api.listAudio()
+      .then((res) => setAudioAssets(res.assets || []))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!id) return;
@@ -55,7 +66,7 @@ export default function BatchPage() {
     pollRef.current = window.setInterval(tick, 3000);
     return () => stopPolling();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [id, refreshKey]);
 
   const first = tasks[0];
   const namesText = useMemo(
@@ -67,9 +78,34 @@ export default function BatchPage() {
     return JSON.stringify(first.imageSettings, null, 2);
   }, [first]);
 
+  const audioLabel = useMemo(() => {
+    if (!first) return "";
+    if (first.generateAudio) return "сгенерирован моделью";
+    const asset = audioAssets.find((a) => a.id === first.audioAssetId);
+    if (asset) {
+      return `${asset.title || asset.filename} (${formatDuration(asset.durationSeconds)})`;
+    }
+    // The track may have been deleted from the library since the batch ran.
+    return first.audioObject || "—";
+  }, [first, audioAssets]);
+
   const doneCount = tasks.filter((t) => t.status === "done").length;
+  const failedCount = tasks.filter((t) => t.status === "failed").length;
   const totalCostUsd = tasks.reduce((sum, t) => sum + (t.costUsd || 0), 0);
   const totalCostRub = tasks.reduce((sum, t) => sum + (t.costRub || 0), 0);
+
+  async function retryFailed() {
+    setError("");
+    setRetrying(true);
+    try {
+      await api.retryBatch(id);
+      setRefreshKey((k) => k + 1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось перезапустить задачи");
+    } finally {
+      setRetrying(false);
+    }
+  }
 
   async function remove() {
     if (!window.confirm("Удалить эту пачку и все её видео безвозвратно?")) return;
@@ -108,6 +144,15 @@ export default function BatchPage() {
             </p>
           )}
         </div>
+        {failedCount > 0 && (
+          <button
+            onClick={retryFailed}
+            disabled={retrying}
+            className="px-3 py-1.5 rounded-full text-sm text-blue-600 hover:bg-blue-50 disabled:opacity-50 transition"
+          >
+            {retrying ? "Перезапускаем…" : `↻ Повторить ошибки (${failedCount})`}
+          </button>
+        )}
         <button
           onClick={remove}
           disabled={deleting}
@@ -164,6 +209,10 @@ export default function BatchPage() {
             </Field>
           </div>
 
+          <Field label="Звук">
+            <input className={roCls} value={audioLabel} readOnly />
+          </Field>
+
           {extraSettings && (
             <Field label="Настройки шаблона (снимок)">
               <textarea className={`${roCls} font-mono text-xs min-h-24`} value={extraSettings} readOnly />
@@ -186,7 +235,7 @@ export default function BatchPage() {
               </span>
             </div>
           </div>
-          <TaskTable tasks={tasks} />
+          <TaskTable tasks={tasks} onRetried={() => setRefreshKey((k) => k + 1)} />
         </section>
       </div>
     </div>

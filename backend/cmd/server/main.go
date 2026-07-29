@@ -15,6 +15,7 @@ import (
 	"named_clocks/backend/internal/currency"
 	"named_clocks/backend/internal/db"
 	"named_clocks/backend/internal/imanator"
+	"named_clocks/backend/internal/media"
 	"named_clocks/backend/internal/openrouter"
 	"named_clocks/backend/internal/storage"
 	"named_clocks/backend/internal/store"
@@ -59,14 +60,39 @@ func main() {
 	imClient := imanator.New(cfg.ImanatorBaseURL, cfg.ImanatorAPIKey)
 	orClient := openrouter.New(cfg.OpenRouterBaseURL, cfg.OpenRouterAPIKey, cfg.OpenRouterProxyURL, cfg.OpenRouterTimeout)
 
+	// --- Media tooling ---
+	ff := media.New(media.Options{
+		Concurrency:      cfg.FFmpegConcurrency,
+		TempDir:          cfg.MediaTmpDir,
+		SmoothStretch:    cfg.MediaSmoothStretch,
+		MaxStretchFactor: cfg.MediaMaxStretchFactor,
+		OutputFPS:        cfg.MediaOutputFPS,
+	})
+	if err := ff.CheckTools(ctx); err != nil {
+		// Not fatal: generation without a soundtrack and the rest of the API keep
+		// working, but anything media related will fail with a clear message.
+		log.Printf("media: WARNING %v — audio mixing and mp3 tools are unavailable", err)
+	}
+
 	// --- Worker pool ---
-	wk := worker.New(st, imClient, orClient, strg, cfg.WorkerConcurrency, cfg.PollInterval, cfg.StageTimeout)
+	wk := worker.New(st, imClient, orClient, strg, ff, worker.Options{
+		Concurrency:  cfg.WorkerConcurrency,
+		PollInterval: cfg.PollInterval,
+		StageTimeout: cfg.StageTimeout,
+		LeaseTimeout: cfg.LeaseTimeout,
+		MaxAttempts:  cfg.MaxTaskAttempts,
+	})
 	go wk.Run(ctx)
 
 	// --- HTTP API ---
 	authn := auth.New(cfg.AppLogin, cfg.AppPassword, cfg.JWTSecret)
 	rater := currency.New(cfg.UsdRubRate)
-	srv := api.NewServer(st, authn, orClient, strg, rater, cfg.OpenRouterDefaultModel)
+	srv := api.NewServer(st, authn, orClient, strg, ff, rater, api.Options{
+		DefaultModel:    cfg.OpenRouterDefaultModel,
+		DefaultDuration: cfg.OpenRouterDefaultDuration,
+		MaxAudioMB:      cfg.MediaMaxAudioMB,
+		MaxVideoMB:      cfg.MediaMaxVideoUploadMB,
+	})
 
 	httpServer := &http.Server{
 		Addr:              ":" + cfg.HTTPPort,

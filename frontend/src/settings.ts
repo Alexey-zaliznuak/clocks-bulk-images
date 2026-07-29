@@ -9,6 +9,10 @@ export interface UiSettings {
   videoDuration: string; // kept as string for the input; parsed on submit
   videoResolution: string;
   videoAspectRatio: string;
+  // Ask the model for a soundtrack instead of muxing an mp3 in. Off by default:
+  // audio-capable generations cost noticeably more.
+  generateAudio: boolean;
+  audioAssetId: string;
   firstNameKey: string;
   lastNameKey: string;
   fullNameKey: string;
@@ -23,9 +27,11 @@ export const DEFAULT_SETTINGS: UiSettings = {
   templateId: "",
   videoModel: "",
   videoPrompt: "",
-  videoDuration: "",
+  videoDuration: "4",
   videoResolution: "",
   videoAspectRatio: "",
+  generateAudio: false,
+  audioAssetId: "",
   firstNameKey: "firstName",
   lastNameKey: "lastName",
   fullNameKey: "name",

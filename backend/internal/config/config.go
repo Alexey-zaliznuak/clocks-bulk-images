@@ -30,12 +30,41 @@ type Config struct {
 	OpenRouterAPIKey       string
 	OpenRouterBaseURL      string
 	OpenRouterDefaultModel string
-	OpenRouterProxyURL     string
-	OpenRouterTimeout      time.Duration
+	// OpenRouterDefaultDuration is the clip length in seconds requested when the
+	// user leaves the duration empty.
+	OpenRouterDefaultDuration int
+	OpenRouterProxyURL        string
+	OpenRouterTimeout         time.Duration
 
 	WorkerConcurrency int
 	PollInterval      time.Duration
-	StageTimeout      time.Duration
+	// StageTimeout bounds how long a single stage may wait for an external
+	// provider before the task is rescheduled.
+	StageTimeout time.Duration
+	// LeaseTimeout is how long a claimed task stays locked without being
+	// touched. It also decides how fast work is picked up again after the
+	// process dies mid-task, so keep it well below StageTimeout.
+	LeaseTimeout time.Duration
+	// MaxTaskAttempts is the total number of tries per task (first attempt plus
+	// retries) before a transient failure is treated as final.
+	MaxTaskAttempts int
+
+	// FFmpegConcurrency caps simultaneous ffmpeg processes (encoding is CPU
+	// bound, so it should stay below WorkerConcurrency).
+	FFmpegConcurrency int
+	// MediaTmpDir holds scratch files for uploads and encodes.
+	MediaTmpDir string
+	// MediaSmoothStretch interpolates frames when slowing a clip down: much
+	// smoother slow motion, much more CPU per clip.
+	MediaSmoothStretch bool
+	// MediaMaxStretchFactor is the largest slow-down allowed when fitting a clip
+	// to a soundtrack.
+	MediaMaxStretchFactor float64
+	// MediaOutputFPS is the frame rate of the rendered videos.
+	MediaOutputFPS int
+	// MediaMaxAudioMB / MediaMaxVideoUploadMB bound the upload endpoints.
+	MediaMaxAudioMB       int64
+	MediaMaxVideoUploadMB int64
 
 	// UsdRubRate is the fallback USD→RUB rate used when the live feed is
 	// unavailable. A live rate is still preferred when reachable.
@@ -63,15 +92,26 @@ func Load() *Config {
 		ImanatorAPIKey:  env("IMANATOR_API_KEY", ""),
 		ImanatorBaseURL: env("IMANATOR_BASE_URL", "https://imanator.pro"),
 
-		OpenRouterAPIKey:       env("OPENROUTER_API_KEY", ""),
-		OpenRouterBaseURL:      env("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
-		OpenRouterDefaultModel: env("OPENROUTER_DEFAULT_MODEL", "google/veo-3.1"),
-		OpenRouterProxyURL:     env("OPENROUTER_PROXY_URL", ""),
-		OpenRouterTimeout:      time.Duration(envInt("OPENROUTER_TIMEOUT_SECONDS", 120)) * time.Second,
+		OpenRouterAPIKey:          env("OPENROUTER_API_KEY", ""),
+		OpenRouterBaseURL:         env("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
+		OpenRouterDefaultModel:    env("OPENROUTER_DEFAULT_MODEL", "google/veo-3.1-lite"),
+		OpenRouterDefaultDuration: envInt("OPENROUTER_DEFAULT_DURATION", 4),
+		OpenRouterProxyURL:        env("OPENROUTER_PROXY_URL", ""),
+		OpenRouterTimeout:         time.Duration(envInt("OPENROUTER_TIMEOUT_SECONDS", 120)) * time.Second,
 
 		WorkerConcurrency: envInt("WORKER_CONCURRENCY", 4),
 		PollInterval:      time.Duration(envInt("POLL_INTERVAL_SECONDS", 2)) * time.Second,
-		StageTimeout:      time.Duration(envInt("STAGE_TIMEOUT_SECONDS", 600)) * time.Second,
+		StageTimeout:      time.Duration(envInt("STAGE_TIMEOUT_SECONDS", 1800)) * time.Second,
+		LeaseTimeout:      time.Duration(envInt("LEASE_TIMEOUT_SECONDS", 90)) * time.Second,
+		MaxTaskAttempts:   envInt("MAX_TASK_ATTEMPTS", 5),
+
+		FFmpegConcurrency:     envInt("FFMPEG_CONCURRENCY", 2),
+		MediaTmpDir:           env("MEDIA_TMP_DIR", ""),
+		MediaSmoothStretch:    envBool("MEDIA_SMOOTH_STRETCH", false),
+		MediaMaxStretchFactor: envFloat("MEDIA_MAX_STRETCH_FACTOR", 6),
+		MediaOutputFPS:        envInt("MEDIA_OUTPUT_FPS", 30),
+		MediaMaxAudioMB:       int64(envInt("MEDIA_MAX_AUDIO_MB", 50)),
+		MediaMaxVideoUploadMB: int64(envInt("MEDIA_MAX_VIDEO_UPLOAD_MB", 500)),
 
 		UsdRubRate: envFloat("USD_RUB_RATE", 85),
 	}

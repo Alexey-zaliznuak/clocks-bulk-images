@@ -11,7 +11,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /out/server ./cmd/server
 
 # ---- runtime stage ----
 FROM alpine:3.20
-RUN apk add --no-cache ca-certificates tzdata && adduser -D -u 10001 app
+# ffmpeg/ffprobe fit generated clips onto soundtracks and extract mp3 tracks.
+RUN apk add --no-cache ca-certificates tzdata ffmpeg && adduser -D -u 10001 app
 WORKDIR /app
 COPY --from=build /out/server /app/server
 USER app
