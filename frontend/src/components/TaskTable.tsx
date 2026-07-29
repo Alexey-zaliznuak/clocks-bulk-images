@@ -56,7 +56,9 @@ export default function TaskTable({
                   {t.firstName} {t.lastName}
                 </td>
                 <td className="px-4 py-2.5">
-                  <span className={`inline-block px-2 py-0.5 rounded-full text-xs ${statusClasses(t.status)}`}>
+                  <span
+                    className={`inline-block px-2 py-0.5 rounded-full text-xs whitespace-nowrap ${statusClasses(t.status)}`}
+                  >
                     {statusLabel(t.status)}
                   </span>
                   {t.error && (

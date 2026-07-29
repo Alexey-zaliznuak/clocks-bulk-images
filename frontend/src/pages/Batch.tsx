@@ -89,6 +89,17 @@ export default function BatchPage() {
     return first.audioObject || "—";
   }, [first, audioAssets]);
 
+  // Short one-line recap shown while the settings block stays collapsed.
+  const summaryChips = useMemo(() => {
+    const chips = [`${tasks.length} ФИО`];
+    const model = first?.videoModel || batch?.videoModel;
+    if (model) chips.push(model);
+    if (first?.videoDuration) chips.push(`${first.videoDuration} сек`);
+    if (first?.videoResolution) chips.push(first.videoResolution);
+    if (first?.videoAspectRatio) chips.push(first.videoAspectRatio);
+    return chips;
+  }, [tasks.length, first, batch]);
+
   const doneCount = tasks.filter((t) => t.status === "done").length;
   const failedCount = tasks.filter((t) => t.status === "failed").length;
   const totalCostUsd = tasks.reduce((sum, t) => sum + (t.costUsd || 0), 0);
@@ -125,7 +136,7 @@ export default function BatchPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* header */}
       <div className="flex flex-wrap items-center gap-3">
         <Link
@@ -168,21 +179,30 @@ export default function BatchPage() {
         </div>
       )}
 
-      <div className="rounded-xl bg-blue-50 border border-blue-200 text-blue-700 text-sm px-4 py-2.5">
-        🔒 Пачка уже отправлена на генерацию — список ФИО и настройки изменить нельзя.
-      </div>
+      {/* read-only settings, collapsed so results get the full width */}
+      <details className="group rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <summary className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-2.5 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+          <span className="text-blue-500 text-xs transition group-open:rotate-90">▸</span>
+          <span className="text-sm font-semibold text-slate-900">Параметры пачки</span>
+          <span className="min-w-0 truncate text-xs text-slate-500 group-open:hidden">
+            {summaryChips.join(" · ")}
+          </span>
+          <span className="ml-auto text-xs text-slate-400 shrink-0">
+            🔒 только просмотр
+          </span>
+        </summary>
 
-      <div className="grid lg:grid-cols-[1fr_1.1fr] gap-6">
-        {/* left: read-only settings */}
-        <section className="space-y-5">
-          <h2 className="text-lg font-semibold text-slate-900">Параметры пачки</h2>
-
+        <div className="border-t border-slate-100 px-4 py-4 grid md:grid-cols-2 gap-x-4 gap-y-3">
           <Field label={`Список ФИО (${tasks.length})`}>
             <textarea
-              className={`${roCls} min-h-40 font-mono text-sm`}
+              className={`${roCls} min-h-24 font-mono text-xs`}
               value={namesText}
               readOnly
             />
+          </Field>
+
+          <Field label="Промпт для видео">
+            <textarea className={`${roCls} min-h-24 text-xs`} value={first?.videoPrompt || ""} readOnly />
           </Field>
 
           <Field label="ID шаблона Иманатора">
@@ -193,12 +213,8 @@ export default function BatchPage() {
             <input className={roCls} value={first?.videoModel || batch?.videoModel || ""} readOnly />
           </Field>
 
-          <Field label="Промпт для видео">
-            <textarea className={`${roCls} min-h-28 text-sm`} value={first?.videoPrompt || ""} readOnly />
-          </Field>
-
-          <div className="grid grid-cols-3 gap-3">
-            <Field label="Длительность (сек)">
+          <div className="grid grid-cols-3 gap-2">
+            <Field label="Длительность">
               <input className={roCls} value={first?.videoDuration ?? "авто"} readOnly />
             </Field>
             <Field label="Разрешение">
@@ -218,37 +234,36 @@ export default function BatchPage() {
               <textarea className={`${roCls} font-mono text-xs min-h-24`} value={extraSettings} readOnly />
             </Field>
           )}
-        </section>
+        </div>
+      </details>
 
-        {/* right: results */}
-        <section className="space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-lg font-semibold text-slate-900">Результаты</h2>
-            <div className="flex items-center gap-3 text-xs">
-              {totalCostUsd > 0 && (
-                <span className="text-slate-600" title={formatUsd(totalCostUsd)}>
-                  {formatRub(totalCostRub)}
-                </span>
-              )}
-              <span className="text-slate-500">
-                {doneCount}/{tasks.length} готово
+      <section className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold text-slate-900">Результаты</h2>
+          <div className="flex items-center gap-3 text-xs">
+            {totalCostUsd > 0 && (
+              <span className="text-slate-600" title={formatUsd(totalCostUsd)}>
+                {formatRub(totalCostRub)}
               </span>
-            </div>
+            )}
+            <span className="text-slate-500">
+              {doneCount}/{tasks.length} готово
+            </span>
           </div>
-          <TaskTable tasks={tasks} onRetried={() => setRefreshKey((k) => k + 1)} />
-        </section>
-      </div>
+        </div>
+        <TaskTable tasks={tasks} onRetried={() => setRefreshKey((k) => k + 1)} />
+      </section>
     </div>
   );
 }
 
 const roCls =
-  "w-full px-3 py-2 rounded-xl bg-slate-100 border border-slate-200 text-slate-600 outline-none cursor-not-allowed";
+  "w-full px-3 py-1.5 rounded-xl bg-slate-100 border border-slate-200 text-slate-600 text-sm outline-none cursor-not-allowed";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="block text-sm text-slate-500 mb-1">{label}</span>
+      <span className="block text-xs text-slate-500 mb-1">{label}</span>
       {children}
     </label>
   );
