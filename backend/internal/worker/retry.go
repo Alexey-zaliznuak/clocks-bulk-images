@@ -15,11 +15,19 @@ import (
 
 	"named_clocks/backend/internal/imanator"
 	"named_clocks/backend/internal/openrouter"
+	"named_clocks/backend/internal/store"
 )
 
-// maxConsecutivePollErrors is how many failed status checks in a row a polling
-// stage tolerates before giving up and letting the task be rescheduled.
-const maxConsecutivePollErrors = 10
+const (
+	// maxConsecutivePollErrors is how many failed status checks in a row a
+	// non-Imanator polling stage tolerates before letting the task be rescheduled.
+	maxConsecutivePollErrors = 10
+
+	// Imanator outages are retried at a steady, deliberately conservative rate.
+	// Unlike the shared attempt budget, this does not turn a temporary provider
+	// outage into hundreds of failed tasks that need manual intervention.
+	imanatorRetryInterval = time.Minute
+)
 
 // transientError marks a failure that is expected to go away on its own — a
 // network blip, a 5xx, a poll timeout. The task keeps its status and is retried
@@ -78,6 +86,11 @@ func isTransient(err error) bool {
 	// Typed HTTP statuses from our own clients.
 	var imErr *imanator.HTTPError
 	if errors.As(err, &imErr) {
+		// Imanator's edge/proxy returns 404 while the upstream service is down.
+		// Treat it as an outage here without changing 404 handling for other APIs.
+		if imErr.StatusCode == http.StatusNotFound {
+			return true
+		}
 		return isTransientStatus(imErr.StatusCode)
 	}
 	var orErr *openrouter.HTTPError
@@ -141,6 +154,26 @@ func backoff(attempt int) time.Duration {
 		d = ceiling
 	}
 	return d + time.Duration(rand.Int63n(int64(d)/5+1))
+}
+
+// isImanatorStage reports whether the current operation talks to Imanator.
+// StatusImageReady is intentionally excluded: that status starts OpenRouter.
+func isImanatorStage(status string) bool {
+	switch status {
+	case store.StatusQueued, store.StatusImageCreating, store.StatusImagePolling:
+		return true
+	default:
+		return false
+	}
+}
+
+// retryDelay keeps Imanator retries one minute apart while preserving the
+// exponential backoff used by the rest of the pipeline.
+func retryDelay(status string, attempt int) time.Duration {
+	if isImanatorStage(status) {
+		return imanatorRetryInterval
+	}
+	return backoff(attempt)
 }
 
 // pollTimeout builds the error returned when a stage waits too long. It is

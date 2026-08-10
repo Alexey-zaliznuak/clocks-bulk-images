@@ -37,6 +37,7 @@ func TestIsTransient(t *testing.T) {
 		},
 		{"imanator 503", &imanator.HTTPError{StatusCode: 503}, true},
 		{"imanator 429", &imanator.HTTPError{StatusCode: 429}, true},
+		{"imanator outage 404", &imanator.HTTPError{StatusCode: 404}, true},
 		{"imanator 400", &imanator.HTTPError{StatusCode: 400}, false},
 		{"imanator 401", &imanator.HTTPError{StatusCode: 401}, false},
 		{"openrouter download 502", &openrouter.HTTPError{StatusCode: 502}, true},
@@ -94,5 +95,23 @@ func TestBackoffGrowsAndIsCapped(t *testing.T) {
 	// Guard against a zero or negative wait, which would spin the worker.
 	if d := backoff(0); d <= 0 {
 		t.Fatalf("backoff(0) = %s, expected a positive delay", d)
+	}
+}
+
+func TestImanatorRetryDelayIsAlwaysOneMinute(t *testing.T) {
+	for _, status := range []string{"queued", "image_creating", "image_polling"} {
+		for _, attempt := range []int{1, 5, 100} {
+			if got := retryDelay(status, attempt); got != time.Minute {
+				t.Fatalf("retryDelay(%q, %d) = %s, want 1m", status, attempt, got)
+			}
+		}
+	}
+}
+
+func TestNonImanatorRetryDelayUsesBackoff(t *testing.T) {
+	for _, status := range []string{"image_ready", "video_creating", "video_polling", "audio_mixing"} {
+		if got := retryDelay(status, 2); got < time.Minute {
+			t.Fatalf("retryDelay(%q, 2) = %s, expected exponential backoff", status, got)
+		}
 	}
 }

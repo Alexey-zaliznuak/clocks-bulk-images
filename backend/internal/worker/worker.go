@@ -168,19 +168,27 @@ func (w *Worker) process(ctx context.Context, t *store.Task) {
 	log.Printf("worker: task %s finished with status=%s", t.ID, t.Status)
 }
 
-// handleStageError either schedules another attempt or gives up. Temporary
-// problems (OpenRouter down, network dropped, provider slow) never end a task
-// while attempts are left.
+// handleStageError either schedules another attempt or gives up. Imanator
+// outages are retried indefinitely once a minute: a provider-wide interruption
+// must not turn a whole batch into failed tasks. Other temporary problems still
+// use the shared attempt budget.
 func (w *Worker) handleStageError(ctx context.Context, t *store.Task, cause error) {
 	t.Attempts++
-	if !isTransient(cause) || t.Attempts >= w.maxAttempts {
+	temporary := isTransient(cause)
+	imanatorOutage := temporary && isImanatorStage(t.Status)
+	if !temporary || (!imanatorOutage && t.Attempts >= w.maxAttempts) {
 		w.fail(ctx, t, cause)
 		return
 	}
-	delay := backoff(t.Attempts)
+	delay := retryDelay(t.Status, t.Attempts)
 	t.Error = cause.Error()
-	log.Printf("worker: task %s transient failure at status=%s (attempt %d/%d), retrying in %s: %v",
-		t.ID, t.Status, t.Attempts, w.maxAttempts, delay.Round(time.Second), cause)
+	if imanatorOutage {
+		log.Printf("worker: task %s Imanator unavailable at status=%s (attempt %d), retrying in %s: %v",
+			t.ID, t.Status, t.Attempts, delay, cause)
+	} else {
+		log.Printf("worker: task %s transient failure at status=%s (attempt %d/%d), retrying in %s: %v",
+			t.ID, t.Status, t.Attempts, w.maxAttempts, delay.Round(time.Second), cause)
+	}
 	if err := w.store.Reschedule(ctx, t, delay); err != nil {
 		log.Printf("worker: reschedule task %s: %v", t.ID, err)
 	}
@@ -219,7 +227,6 @@ func (w *Worker) stageCreateImage(ctx context.Context, t *store.Task) error {
 // Stage 1b: poll the Imanator order until the image is ready.
 func (w *Worker) stagePollImage(ctx context.Context, t *store.Task) error {
 	deadline := time.Now().Add(w.stageTimeout)
-	failures := 0
 	for {
 		if time.Now().After(deadline) {
 			return pollTimeout("imanator", t.ImanatorOrderID, w.stageTimeout)
@@ -235,15 +242,11 @@ func (w *Worker) stagePollImage(ctx context.Context, t *store.Task) error {
 			if !isTransient(err) {
 				return wrapped
 			}
-			failures++
-			if failures >= maxConsecutivePollErrors {
-				return transient(wrapped)
-			}
-			log.Printf("worker: task %s: imanator poll error %d/%d: %v",
-				t.ID, failures, maxConsecutivePollErrors, err)
-			continue
+			// Reschedule immediately so the next request is a minute away. The
+			// generic poll loop retries rapidly, which would hammer Imanator
+			// during a provider-wide outage.
+			return transient(wrapped)
 		}
-		failures = 0
 
 		if order.IsFailed() {
 			return fmt.Errorf("imanator order failed: status=%s", order.Status)

@@ -214,6 +214,12 @@ export const api = {
   deleteBatch: (id: string) =>
     request<{ deleted: string }>(`/api/batches/${id}`, { method: "DELETE" }),
 
+  createBatchArchive: (id: string) =>
+    request<{ downloadUrl: string; filename: string; count: number }>(
+      `/api/batches/${id}/archive`,
+      { method: "POST" },
+    ),
+
   listAudio: () => request<{ assets: MediaAsset[] }>("/api/media/audio"),
 
   uploadAudio: (file: File, title?: string) => {

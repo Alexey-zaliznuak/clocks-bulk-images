@@ -7,11 +7,11 @@ import (
 )
 
 // videoFileName builds the name the finished clip is saved under:
-// "<дата>_<имя>_<фамилия>_<отчество>.mp4". Missing parts are simply skipped —
+// "<имя>_<фамилия>_<отчество>.mp4". Missing parts are simply skipped —
 // the last name field holds everything after the first token, so a patronymic
 // ends up as its own segment.
 func videoFileName(t *store.Task) string {
-	parts := []string{t.CreatedAt.Format("2006-01-02")}
+	var parts []string
 	parts = append(parts, strings.Fields(t.FirstName)...)
 	parts = append(parts, strings.Fields(t.LastName)...)
 

@@ -104,6 +104,7 @@ func (s *Server) Router() http.Handler {
 		pr.Get("/api/batches", s.handleListBatches)
 		pr.Get("/api/batches/{id}", s.handleGetBatch)
 		pr.Post("/api/batches/{id}/retry", s.handleRetryBatch)
+		pr.Post("/api/batches/{id}/archive", s.handleBatchArchive)
 		pr.Delete("/api/batches/{id}", s.handleDeleteBatch)
 
 		pr.Get("/api/media/audio", s.handleListAudio)

@@ -16,6 +16,8 @@ export default function BatchPage() {
   const [error, setError] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  const [retryMessage, setRetryMessage] = useState("");
   // Bumped after a retry so the polling effect restarts.
   const [refreshKey, setRefreshKey] = useState(0);
   const pollRef = useRef<number | null>(null);
@@ -107,9 +109,11 @@ export default function BatchPage() {
 
   async function retryFailed() {
     setError("");
+    setRetryMessage("");
     setRetrying(true);
     try {
-      await api.retryBatch(id);
+      const result = await api.retryBatch(id);
+      setRetryMessage(`Перезапущено задач: ${result.retried}`);
       setRefreshKey((k) => k + 1);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Не удалось перезапустить задачи");
@@ -128,6 +132,24 @@ export default function BatchPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Не удалось удалить пачку");
       setDeleting(false);
+    }
+  }
+
+  async function downloadArchive() {
+    setError("");
+    setArchiving(true);
+    try {
+      const { downloadUrl } = await api.createBatchArchive(id);
+      const a = document.createElement("a");
+      a.href = downloadUrl;
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось собрать архив");
+    } finally {
+      setArchiving(false);
     }
   }
 
@@ -159,9 +181,9 @@ export default function BatchPage() {
           <button
             onClick={retryFailed}
             disabled={retrying}
-            className="px-3 py-1.5 rounded-full text-sm text-blue-600 hover:bg-blue-50 disabled:opacity-50 transition"
+            className="px-4 py-2 rounded-xl text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition"
           >
-            {retrying ? "Перезапускаем…" : `↻ Повторить ошибки (${failedCount})`}
+            {retrying ? "Перезапускаем…" : `↻ Повторить все ошибки (${failedCount})`}
           </button>
         )}
         <button
@@ -176,6 +198,11 @@ export default function BatchPage() {
       {error && (
         <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
           {error}
+        </div>
+      )}
+      {retryMessage && (
+        <div className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">
+          {retryMessage}
         </div>
       )}
 
@@ -238,9 +265,9 @@ export default function BatchPage() {
       </details>
 
       <section className="space-y-3">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-lg font-semibold text-slate-900">Результаты</h2>
-          <div className="flex items-center gap-3 text-xs">
+          <div className="flex flex-wrap items-center gap-3 text-xs">
             {totalCostUsd > 0 && (
               <span className="text-slate-600" title={formatUsd(totalCostUsd)}>
                 {formatRub(totalCostRub)}
@@ -249,6 +276,15 @@ export default function BatchPage() {
             <span className="text-slate-500">
               {doneCount}/{tasks.length} готово
             </span>
+            {doneCount > 0 && (
+              <button
+                onClick={downloadArchive}
+                disabled={archiving}
+                className="px-3 py-1.5 rounded-xl text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition"
+              >
+                {archiving ? "Собираем архив…" : "↓ Скачать архив"}
+              </button>
+            )}
           </div>
         </div>
         <TaskTable tasks={tasks} onRetried={() => setRefreshKey((k) => k + 1)} />
