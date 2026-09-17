@@ -1,6 +1,7 @@
 // Human-readable labels and colors for the task state machine.
 
 export const STATUS_LABELS: Record<string, string> = {
+  draft: "Черновик",
   queued: "В очереди",
   image_creating: "Создаём изображение",
   image_polling: "Ждём изображение",
@@ -19,6 +20,8 @@ export function statusLabel(status: string): string {
 
 export function statusClasses(status: string): string {
   switch (status) {
+    case "draft":
+      return "bg-amber-50 text-amber-700 border border-amber-200";
     case "done":
       return "bg-emerald-50 text-emerald-700 border border-emerald-200";
     case "failed":
