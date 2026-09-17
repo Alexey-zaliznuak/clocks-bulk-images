@@ -171,6 +171,71 @@ export interface CreateBatchPayload {
   names: { firstName: string; lastName: string }[];
 }
 
+export interface CampaignDiagnostics {
+  duplicateCount: number;
+  invalidCapitalization: string[];
+}
+
+export interface AdCampaign {
+  id: string;
+  title: string;
+  lifecycle: string;
+  nameTextTemplate: string;
+  surnameTextTemplate: string;
+  templateId: string;
+  imageSettings: Record<string, string>;
+  nameSettingKey: string;
+  videoModel: string;
+  videoPrompt: string;
+  videoDuration: number | null;
+  videoResolution: string;
+  videoAspectRatio: string;
+  generateAudio: boolean;
+  audioAssetId?: string;
+  createdAt: string;
+  startedAt?: string;
+  total: number;
+  nameCount: number;
+  surnameCount: number;
+  done: number;
+  failed: number;
+  costUsd: number;
+  costRub: number;
+}
+
+export interface AdCampaignItem {
+  id: string;
+  campaignId: string;
+  kind: "name" | "surname";
+  value: string;
+  status: string;
+  error: string;
+  attempts: number;
+  costUsd: number;
+  costRub: number;
+  imageDownloadUrl?: string;
+  sourceDownloadUrl?: string;
+  videoDownloadUrl?: string;
+}
+
+export interface CreateAdCampaignPayload {
+  title: string;
+  names: string[];
+  surnames: string[];
+  nameTextTemplate: string;
+  surnameTextTemplate: string;
+  templateId: string;
+  imageSettings: Record<string, string>;
+  nameSettingKey: string;
+  videoModel: string;
+  videoPrompt: string;
+  videoDuration: number | null;
+  videoResolution: string;
+  videoAspectRatio: string;
+  generateAudio: boolean;
+  audioAssetId: string;
+}
+
 // ---------- endpoints ----------
 
 export const api = {
@@ -219,6 +284,65 @@ export const api = {
       `/api/batches/${id}/archive`,
       { method: "POST" },
     ),
+
+  campaignDefaults: () =>
+    request<{
+      names: string[];
+      surnames: string[];
+      nameTextTemplate: string;
+      surnameTextTemplate: string;
+      diagnostics: { names: CampaignDiagnostics; surnames: CampaignDiagnostics };
+    }>("/api/ad-campaigns/defaults"),
+
+  createAdCampaign: (payload: CreateAdCampaignPayload) =>
+    request<{
+      campaign: AdCampaign;
+      diagnostics: { names: CampaignDiagnostics; surnames: CampaignDiagnostics };
+    }>("/api/ad-campaigns", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  listAdCampaigns: () =>
+    request<{ campaigns: AdCampaign[]; usdRubRate: number }>("/api/ad-campaigns"),
+
+  getAdCampaign: (id: string) =>
+    request<{ campaign: AdCampaign; usdRubRate: number }>(`/api/ad-campaigns/${id}`),
+
+  listAdCampaignItems: (
+    id: string,
+    options: { limit?: number; offset?: number; kind?: "name" | "surname"; status?: string } = {},
+  ) => {
+    const params = new URLSearchParams({
+      limit: String(options.limit ?? 50),
+      offset: String(options.offset ?? 0),
+    });
+    if (options.kind) params.set("kind", options.kind);
+    if (options.status) params.set("status", options.status);
+    return request<{
+      items: AdCampaignItem[];
+      total: number;
+      limit: number;
+      offset: number;
+      usdRubRate: number;
+    }>(`/api/ad-campaigns/${id}/items?${params.toString()}`);
+  },
+
+  startAdCampaign: (id: string) =>
+    request<{ status: string; queued: number }>(`/api/ad-campaigns/${id}/start`, {
+      method: "POST",
+    }),
+
+  retryAdCampaign: (id: string) =>
+    request<{ retried: number }>(`/api/ad-campaigns/${id}/retry`, { method: "POST" }),
+
+  retryAdCampaignItem: (id: string) =>
+    request<{ id: string; status: string }>(`/api/ad-campaigns/items/${id}/retry`, {
+      method: "POST",
+    }),
+
+  deleteAdCampaign: (id: string) =>
+    request<{ deleted: string }>(`/api/ad-campaigns/${id}`, { method: "DELETE" }),
 
   listAudio: () => request<{ assets: MediaAsset[] }>("/api/media/audio"),
 

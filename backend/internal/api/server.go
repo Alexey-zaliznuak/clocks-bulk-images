@@ -107,6 +107,16 @@ func (s *Server) Router() http.Handler {
 		pr.Post("/api/batches/{id}/archive", s.handleBatchArchive)
 		pr.Delete("/api/batches/{id}", s.handleDeleteBatch)
 
+		pr.Get("/api/ad-campaigns/defaults", s.handleAdCampaignDefaults)
+		pr.Post("/api/ad-campaigns", s.handleCreateAdCampaign)
+		pr.Get("/api/ad-campaigns", s.handleListAdCampaigns)
+		pr.Get("/api/ad-campaigns/{id}", s.handleGetAdCampaign)
+		pr.Get("/api/ad-campaigns/{id}/items", s.handleListAdCampaignItems)
+		pr.Post("/api/ad-campaigns/{id}/start", s.handleStartAdCampaign)
+		pr.Post("/api/ad-campaigns/{id}/retry", s.handleRetryAdCampaign)
+		pr.Post("/api/ad-campaigns/items/{id}/retry", s.handleRetryAdCampaignItem)
+		pr.Delete("/api/ad-campaigns/{id}", s.handleDeleteAdCampaign)
+
 		pr.Get("/api/media/audio", s.handleListAudio)
 		pr.Post("/api/media/audio", s.handleUploadAudio)
 		pr.Delete("/api/media/audio/{id}", s.handleDeleteAudio)

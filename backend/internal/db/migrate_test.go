@@ -79,6 +79,21 @@ func TestMigrationsApply(t *testing.T) {
 		    END,
 		    error='', attempts=0, next_attempt_at=NULL, locked_at=NULL, updated_at=now()
 		 WHERE batch_id='00000000-0000-0000-0000-000000000000' AND status='failed'`,
+		`SELECT c.id, i.id, i.kind, i.value, i.position, i.status, i.image_object,
+		        i.source_video_object, i.video_object, i.cost_usd
+		   FROM ad_campaigns c
+		   JOIN ad_campaign_items i ON i.campaign_id=c.id
+		  WHERE false`,
+		`UPDATE ad_campaign_items SET
+		    status = CASE
+		        WHEN source_video_object <> '' THEN 'audio_mixing'
+		        WHEN openrouter_job_id <> '' THEN 'video_polling'
+		        WHEN image_object <> '' THEN 'image_ready'
+		        ELSE 'queued'
+		    END,
+		    error='', attempts=0, next_attempt_at=NULL, locked_at=NULL
+		  WHERE campaign_id='00000000-0000-0000-0000-000000000000'
+		    AND status='failed'`,
 	} {
 		if _, err := tx.ExecContext(ctx, query); err != nil {
 			t.Fatalf("query does not match schema: %v\nquery: %s", err, query)

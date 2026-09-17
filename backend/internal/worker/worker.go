@@ -95,11 +95,28 @@ func (w *Worker) Run(ctx context.Context) {
 
 func (w *Worker) loop(ctx context.Context, id int) {
 	idle := 2 * time.Second
+	preferCampaign := id%2 == 0
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
+		}
+
+		if preferCampaign {
+			item, err := w.store.ClaimNextAdCampaignItem(ctx, w.leaseTimeout)
+			if err != nil {
+				log.Printf("worker[%d]: campaign claim error: %v", id, err)
+				sleepCtx(ctx, idle)
+				continue
+			}
+			if item != nil {
+				log.Printf("worker[%d]: picked campaign item %s (%s %s) status=%s attempts=%d",
+					id, item.ID, item.Kind, item.Value, item.Status, item.Attempts)
+				w.processCampaignItem(ctx, item)
+				preferCampaign = false
+				continue
+			}
 		}
 
 		t, err := w.store.ClaimNext(ctx, w.leaseTimeout)
@@ -109,13 +126,27 @@ func (w *Worker) loop(ctx context.Context, id int) {
 			continue
 		}
 		if t == nil {
-			sleepCtx(ctx, idle)
+			item, err := w.store.ClaimNextAdCampaignItem(ctx, w.leaseTimeout)
+			if err != nil {
+				log.Printf("worker[%d]: campaign claim error: %v", id, err)
+				sleepCtx(ctx, idle)
+				continue
+			}
+			if item == nil {
+				sleepCtx(ctx, idle)
+				continue
+			}
+			log.Printf("worker[%d]: picked campaign item %s (%s %s) status=%s attempts=%d",
+				id, item.ID, item.Kind, item.Value, item.Status, item.Attempts)
+			w.processCampaignItem(ctx, item)
+			preferCampaign = false
 			continue
 		}
 
 		log.Printf("worker[%d]: picked task %s (%s %s) status=%s attempts=%d",
 			id, t.ID, t.FirstName, t.LastName, t.Status, t.Attempts)
 		w.process(ctx, t)
+		preferCampaign = true
 	}
 }
 
