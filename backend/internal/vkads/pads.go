@@ -187,8 +187,18 @@ func ResolvePads(selected []int, pkg Package, trees []PadNode) []int {
 // ParsePackageDefaultPads reads options.targetings[pads] — the placements the
 // cabinet offers for this package, with "default" preselected.
 func ParsePackageDefaultPads(raw json.RawMessage) []int {
+	values, defaults := ParsePackagePadOptions(raw)
+	if len(defaults) > 0 {
+		return defaults
+	}
+	return values
+}
+
+// ParsePackagePadOptions splits options.targetings[pads] into every placement
+// the package allows and the subset the cabinet preselects.
+func ParsePackagePadOptions(raw json.RawMessage) (values, defaults []int) {
 	if len(raw) == 0 {
-		return nil
+		return nil, nil
 	}
 	var opts struct {
 		Targetings []struct {
@@ -198,18 +208,112 @@ func ParsePackageDefaultPads(raw json.RawMessage) []int {
 		} `json:"targetings"`
 	}
 	if err := json.Unmarshal(raw, &opts); err != nil {
-		return nil
+		return nil, nil
 	}
 	for _, t := range opts.Targetings {
 		if t.Name != "pads" {
 			continue
 		}
-		if len(t.Default) > 0 {
-			return uniqueInts(t.Default)
-		}
-		return uniqueInts(t.Values)
+		return uniqueInts(t.Values), uniqueInts(t.Default)
 	}
-	return nil
+	return nil, nil
+}
+
+// PlacementOptions is the placement picker for one campaign: the package that
+// will carry it, the placements that package allows and the ones VK
+// preselects.
+type PlacementOptions struct {
+	Package Package
+	Trees   []PadNode
+	Default []int
+}
+
+// PlacementTreeForSettings returns the placements these settings can actually
+// use. The cabinet lists dozens of trees for every package it sells, but a
+// group may only target the tree of its own package — ResolvePads drops
+// everything else at upload time, so offering it in the form is misleading.
+func (s *Service) PlacementTreeForSettings(ctx context.Context, settings Settings) (*PlacementOptions, error) {
+	packages, err := s.ListPackages(ctx)
+	if err != nil {
+		return nil, err
+	}
+	pkg := PickCommunityMessagePackage(packages, settings.Normalize().TargetAction)
+	if pkg == nil {
+		return nil, fmt.Errorf("vkads: нет пакета для сообщества / отправки сообщения")
+	}
+	trees, err := s.ListPlacementTree(ctx)
+	if err != nil {
+		return nil, err
+	}
+	scoped := padsTreeForPackage(*pkg, trees)
+	if len(scoped) == 0 {
+		listed, err := s.ListPackagePads(ctx, pkg.ID)
+		if err != nil {
+			return nil, err
+		}
+		scoped = GroupPackagePads(listed)
+	}
+	values, defaults := ParsePackagePadOptions(pkg.Options)
+	if len(values) > 0 {
+		if narrowed := FilterPadTree(scoped, intSet(values)); len(narrowed) > 0 {
+			scoped = narrowed
+		}
+	}
+	return &PlacementOptions{
+		Package: *pkg,
+		Trees:   PrunePadTree(scoped),
+		Default: defaults,
+	}, nil
+}
+
+// FilterPadTree keeps only the placements of allowed, dropping the branches
+// left with nothing to offer.
+func FilterPadTree(nodes []PadNode, allowed map[int]struct{}) []PadNode {
+	out := make([]PadNode, 0, len(nodes))
+	for _, node := range nodes {
+		node.Pads = intersectPadIDs(node.Pads, allowed)
+		node.Children = FilterPadTree(node.Children, allowed)
+		if len(node.Pads) == 0 && len(node.Children) == 0 {
+			continue
+		}
+		out = append(out, node)
+	}
+	return out
+}
+
+// PrunePadTree makes a cabinet tree readable. The raw resource is full of
+// branches that carry no placement at all, of unnamed wrappers and of siblings
+// repeating the same label, and each of those reaches the form as an empty or
+// duplicated checkbox.
+func PrunePadTree(nodes []PadNode) []PadNode {
+	out := make([]PadNode, 0, len(nodes))
+	at := map[string]int{}
+	add := func(node PadNode) {
+		if i, ok := at[node.Name]; ok {
+			out[i].Pads = uniqueInts(append(out[i].Pads, node.Pads...))
+			out[i].Children = PrunePadTree(append(out[i].Children, node.Children...))
+			return
+		}
+		at[node.Name] = len(out)
+		out = append(out, node)
+	}
+	for _, node := range nodes {
+		node.Children = PrunePadTree(node.Children)
+		if len(node.Pads) == 0 && len(node.Children) == 0 {
+			continue
+		}
+		if node.Name == "" {
+			if len(node.Children) > 0 {
+				for _, child := range node.Children {
+					add(child)
+				}
+				continue
+			}
+			node.Name = fmt.Sprintf("Площадка %d", node.Pads[0])
+		}
+		add(node)
+	}
+	return out
 }
 
 func padsTreeForPackage(pkg Package, trees []PadNode) []PadNode {

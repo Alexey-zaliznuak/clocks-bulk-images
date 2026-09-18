@@ -269,10 +269,11 @@ func (w *Worker) prepareBanner(ctx context.Context, item *store.AdCampaignItem, 
 	if pattern == nil {
 		return nil, fmt.Errorf("в пакете нет паттерна объявления")
 	}
-	log.Printf("worker: vk upload banner %s: pattern %d %s", item.Value, pattern.ID, pattern.Name)
+	log.Printf("worker: vk upload banner %s: pattern %d %s [%s]",
+		item.Value, pattern.ID, pattern.Name, vkads.PatternSlotSummary(pattern))
 	images := map[string]int64{}
 	if item.ImageObject != "" {
-		for _, role := range vkads.PatternImageRoles(pattern) {
+		for _, role := range vkads.RequiredImageRoles(pattern) {
 			id, err := w.uploadBannerImage(ctx, item, role)
 			if err != nil {
 				return nil, fmt.Errorf("загрузить картинку %s: %w", role, err)

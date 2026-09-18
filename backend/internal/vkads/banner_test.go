@@ -149,15 +149,26 @@ func TestRoleImageSize(t *testing.T) {
 	}
 }
 
-func TestPatternImageRolesSkipsVideo(t *testing.T) {
+func TestRequiredImageRolesSkipsVideoAndOptional(t *testing.T) {
 	pattern := &BannerPattern{Format: []BannerSlot{
-		{Field: "content", Role: "video_portrait_9_16_30s"},
+		{Field: "content", Role: "video_portrait_9_16_30s", Required: true},
 		{Field: "content", Role: "icon_256x256"},
-		{Field: "textblock", Role: "title_40_vkads"},
+		{Field: "content", Role: "image_600x600", Required: true},
+		{Field: "textblock", Role: "title_40_vkads", Required: true},
 	}}
-	roles := PatternImageRoles(pattern)
-	if len(roles) != 1 || roles[0] != "icon_256x256" {
+	roles := RequiredImageRoles(pattern)
+	if len(roles) != 1 || roles[0] != "image_600x600" {
 		t.Fatalf("roles = %v", roles)
+	}
+}
+
+func TestPatternSlotSummaryMarksRequired(t *testing.T) {
+	pattern := &BannerPattern{Format: []BannerSlot{
+		{Field: "content", Role: "video_portrait_9_16_30s", Required: true},
+		{Field: "content", Role: "icon_256x256"},
+	}}
+	if got := PatternSlotSummary(pattern); got != "content:video_portrait_9_16_30s! content:icon_256x256" {
+		t.Fatalf("summary = %q", got)
 	}
 }
 

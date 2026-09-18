@@ -92,10 +92,34 @@ export default function CampaignCreate() {
   const [padTrees, setPadTrees] = useState<PadNode[]>([]);
   const [padsLoading, setPadsLoading] = useState(false);
   const [padsError, setPadsError] = useState("");
+  const [padsPackage, setPadsPackage] = useState("");
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
   }, [settings]);
+
+  // The placements on offer belong to the package the target action picks, so
+  // the tree is reloaded whenever that action changes.
+  useEffect(() => {
+    setPadsLoading(true);
+    let current = true;
+    api.vkAdsPads(vkSettings.targetAction)
+      .then((res) => {
+        if (!current) return;
+        setPadTrees(res.trees || []);
+        setPadsPackage(res.packageName || "");
+        setPadsError("");
+      })
+      .catch((e) => {
+        if (current) setPadsError(e instanceof Error ? e.message : "Не удалось загрузить площадки");
+      })
+      .finally(() => {
+        if (current) setPadsLoading(false);
+      });
+    return () => {
+      current = false;
+    };
+  }, [vkSettings.targetAction]);
 
   useEffect(() => {
     api.campaignDefaults()
@@ -132,11 +156,6 @@ export default function CampaignCreate() {
         setSettings((s) => ({ ...s, videoModel: s.videoModel || res.defaultModel }));
       })
       .catch((e) => setModelsError(e instanceof Error ? e.message : "Не удалось загрузить модели"));
-    setPadsLoading(true);
-    api.vkAdsPads()
-      .then((res) => setPadTrees(res.trees || []))
-      .catch((e) => setPadsError(e instanceof Error ? e.message : "Не удалось загрузить площадки"))
-      .finally(() => setPadsLoading(false));
     api.listAudio()
       .then((res) => {
         setAudio(res.assets || []);
@@ -468,7 +487,9 @@ export default function CampaignCreate() {
                 <span className="text-sm text-slate-700">Включать возраст «не определён»</span>
               </label>
               <div>
-                <span className="mb-1 block text-sm text-slate-500">Места размещения</span>
+                <span className="mb-1 block text-sm text-slate-500">
+                  Места размещения{padsPackage ? ` — пакет «${padsPackage}»` : ""}
+                </span>
                 <PadsTree
                   trees={padTrees}
                   selected={vkSettings.pads || []}

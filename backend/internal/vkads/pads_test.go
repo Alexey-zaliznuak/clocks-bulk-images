@@ -110,6 +110,61 @@ func TestParsePackageDefaultPadsFallsBackToValues(t *testing.T) {
 	}
 }
 
+func TestPrunePadTreeDropsEmptyAndMergesDuplicates(t *testing.T) {
+	got := PrunePadTree([]PadNode{
+		{ID: "1", Name: "Площадки", Children: []PadNode{
+			{ID: "2", Name: "Desktop", Pads: []int{10}},
+			{ID: "3", Name: "Mobile"},
+			{ID: "4", Name: "Desktop", Pads: []int{11}},
+			{ID: "5", Name: "", Children: []PadNode{{ID: "6", Name: "Лента", Pads: []int{12}}}},
+		}},
+		{ID: "7", Name: "Пусто"},
+	})
+	if len(got) != 1 || got[0].Name != "Площадки" {
+		t.Fatalf("roots = %#v", got)
+	}
+	children := got[0].Children
+	if len(children) != 2 {
+		t.Fatalf("children = %#v", children)
+	}
+	if children[0].Name != "Desktop" || len(children[0].Pads) != 2 {
+		t.Fatalf("merged desktop = %#v", children[0])
+	}
+	if children[1].Name != "Лента" {
+		t.Fatalf("unnamed wrapper must be replaced by its child: %#v", children[1])
+	}
+}
+
+func TestPrunePadTreeNamesBarePads(t *testing.T) {
+	got := PrunePadTree([]PadNode{{ID: "9", Pads: []int{1265106}}})
+	if len(got) != 1 || got[0].Name != "Площадка 1265106" {
+		t.Fatalf("got %#v", got)
+	}
+}
+
+func TestFilterPadTreeKeepsAllowedOnly(t *testing.T) {
+	got := FilterPadTree([]PadNode{
+		{Name: "VK", Children: []PadNode{
+			{Name: "Лента", Pads: []int{1, 2}},
+			{Name: "Клипы", Pads: []int{3}},
+		}},
+		{Name: "OK", Pads: []int{4}},
+	}, intSet([]int{1, 3}))
+	if len(got) != 1 || len(got[0].Children) != 2 {
+		t.Fatalf("got %#v", got)
+	}
+	if len(got[0].Children[0].Pads) != 1 || got[0].Children[0].Pads[0] != 1 {
+		t.Fatalf("feed = %#v", got[0].Children[0])
+	}
+}
+
+func TestParsePackagePadOptionsSplitsValuesAndDefaults(t *testing.T) {
+	values, defaults := ParsePackagePadOptions([]byte(`{"targetings":[{"name":"pads","default":[1],"values":[1,2,3]}]}`))
+	if len(values) != 3 || len(defaults) != 1 || defaults[0] != 1 {
+		t.Fatalf("values=%v defaults=%v", values, defaults)
+	}
+}
+
 func TestGroupPackagePads(t *testing.T) {
 	got := GroupPackagePads([]Pad{
 		{ID: 1, Name: "vk_feed", Description: "Лента ВКонтакте"},
@@ -123,3 +178,4 @@ func TestGroupPackagePads(t *testing.T) {
 		t.Fatalf("vk = %#v", got[0])
 	}
 }
+

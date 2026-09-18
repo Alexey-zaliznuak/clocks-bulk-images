@@ -68,10 +68,13 @@ export default function CampaignDetail() {
   useEffect(() => {
     void loadCampaign();
     void loadItems();
-    api.vkAdsPads()
+  }, [loadCampaign, loadItems]);
+
+  useEffect(() => {
+    api.vkAdsPads(campaign?.vkSettings?.targetAction)
       .then((res) => setPadTrees(res.trees || []))
       .catch(() => {});
-  }, [loadCampaign, loadItems]);
+  }, [campaign?.vkSettings?.targetAction]);
 
   useEffect(() => {
     if (campaign?.lifecycle !== "running" && !isVKUpload(campaign?.lifecycle || "")) return;

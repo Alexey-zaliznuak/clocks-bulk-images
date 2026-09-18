@@ -702,21 +702,19 @@ func aspectHint(videoRole string) string {
 	}
 }
 
-func PatternNeedsImage(p *BannerPattern) bool {
-	return len(PatternImageRoles(p)) > 0
-}
-
-// PatternImageRoles lists the still-image slots of a pattern, e.g.
-// icon_256x256 or image_600x600. Each one needs its own upload: the role name
-// carries the exact pixel size VK validates the creative against.
-func PatternImageRoles(p *BannerPattern) []string {
+// RequiredImageRoles lists the still-image slots a pattern insists on, e.g.
+// image_600x600. Each one needs its own upload, since the role name carries the
+// exact pixel size VK validates the creative against. Optional slots are left
+// out on purpose: a community icon is the community's avatar, which VK fills in
+// by itself and which our generated frame has no business replacing.
+func RequiredImageRoles(p *BannerPattern) []string {
 	if p == nil {
 		return nil
 	}
 	var roles []string
 	seen := map[string]struct{}{}
 	for _, slot := range p.Format {
-		if slot.Field != "content" || strings.Contains(slot.Role, "video") {
+		if slot.Field != "content" || !slot.Required || strings.Contains(slot.Role, "video") {
 			continue
 		}
 		if _, ok := seen[slot.Role]; ok {
@@ -726,6 +724,23 @@ func PatternImageRoles(p *BannerPattern) []string {
 		roles = append(roles, slot.Role)
 	}
 	return roles
+}
+
+// PatternSlotSummary renders a pattern's slots for the log, marking the
+// required ones with a trailing "!".
+func PatternSlotSummary(p *BannerPattern) string {
+	if p == nil {
+		return ""
+	}
+	parts := make([]string, 0, len(p.Format))
+	for _, slot := range p.Format {
+		part := slot.Field + ":" + slot.Role
+		if slot.Required {
+			part += "!"
+		}
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, " ")
 }
 
 // RoleImageSize reads the pixel size encoded in a role name. Roles without one

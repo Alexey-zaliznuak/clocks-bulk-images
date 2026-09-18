@@ -211,15 +211,18 @@ func (s *Server) handleVKAdsPads(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
-	trees, err := s.vkads.ListPlacementTree(ctx)
+	settings := vkads.Settings{TargetAction: r.URL.Query().Get("targetAction")}
+	opts, err := s.vkads.PlacementTreeForSettings(ctx, settings)
 	if err != nil {
 		log.Printf("api: vk ads pads: %v", err)
 		writeError(w, http.StatusBadGateway, "не удалось загрузить места размещения ВКР")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"configured": true,
-		"trees":      trees,
+		"configured":  true,
+		"trees":       opts.Trees,
+		"packageName": opts.Package.Name,
+		"defaultPads": opts.Default,
 	})
 }
 

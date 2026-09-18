@@ -266,8 +266,13 @@ export const api = {
 
   models: () => request<{ models: VideoModel[]; defaultModel: string }>("/api/models"),
 
-  vkAdsPads: () =>
-    request<{ configured: boolean; trees: import("./padsTree").PadNode[] }>("/api/vk-ads/pads"),
+  vkAdsPads: (targetAction?: string) =>
+    request<{
+      configured: boolean;
+      trees: import("./padsTree").PadNode[];
+      packageName?: string;
+      defaultPads?: number[];
+    }>(`/api/vk-ads/pads${targetAction ? `?targetAction=${encodeURIComponent(targetAction)}` : ""}`),
 
   createBatch: (payload: CreateBatchPayload) =>
     request<{ batchId: string; count: number }>("/api/tasks/batch", {
