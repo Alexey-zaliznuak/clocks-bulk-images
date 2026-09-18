@@ -65,7 +65,7 @@ func PlanBody(name string, settings Settings, cat *Catalog) map[string]any {
 		"date_start":       cat.DateStart,
 		"enable_utm":       false,
 		"utm":              settings.RefTags,
-		"objective":        cat.Package.Objective,
+		"objective":        cat.Package.Objective.ForAPI(),
 		"ad_object_type":   "url",
 		"ad_object_id":     cat.URLID,
 		"autobidding_mode": autobiddingMode(settings.BiddingStrategy, settings.Optimization),
@@ -91,7 +91,7 @@ func GroupBody(name string, planID, audienceID int64, settings Settings, cat *Ca
 		"age_restrictions": settings.AgeRestrictions,
 		"enable_utm":       false,
 		"utm":              settings.RefTags,
-		"objective":        cat.Package.Objective,
+		"objective":        cat.Package.Objective.ForAPI(),
 		"autobidding_mode": autobiddingMode(settings.BiddingStrategy, settings.Optimization),
 		"targetings":       groupTargetings(settings, audienceID, cat.RussiaID, cat.Pads),
 	}

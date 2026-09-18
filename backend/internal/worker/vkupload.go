@@ -20,11 +20,8 @@ func (w *Worker) uploadCampaignToVK(ctx context.Context, campaign *store.AdCampa
 	if err := w.doVKUpload(ctx, campaign); err != nil {
 		log.Printf("worker: vk upload %s: %v", campaign.ID, err)
 		campaign.VKUploadError = err.Error()
-		if campaign.VKAdPlanID == "" {
-			campaign.Lifecycle = store.CampaignRunning
-		} else {
-			campaign.Lifecycle = store.CampaignUploading
-		}
+		// Stay in uploading so claim waits for the lease instead of hammering VK.
+		campaign.Lifecycle = store.CampaignUploading
 		_ = w.store.SaveAdCampaignVK(ctx, campaign)
 		return
 	}

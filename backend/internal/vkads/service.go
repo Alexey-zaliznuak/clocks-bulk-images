@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,7 +17,11 @@ import (
 	"named_clocks/backend/internal/zaleycash"
 )
 
-const defaultSkew = 2 * time.Minute
+const (
+	defaultSkew     = 2 * time.Minute
+	catalogTTL      = time.Hour
+	vkMinRequestGap = 400 * time.Millisecond
+)
 
 // Service mints and caches the VK Ads token for one ZaleyCash cabinet, then
 // signs requests to ads.vk.com with it.
@@ -33,8 +38,13 @@ type Service struct {
 	vkTok      cached
 	segments   []Segment
 	segmentsAt time.Time
+	packages   []Package
+	packagesAt time.Time
+	regions    []Region
+	regionsAt  time.Time
 	pads       []PadNode
 	padsAt     time.Time
+	nextOK     time.Time
 }
 
 type cached struct {
@@ -196,25 +206,60 @@ func (s *Service) Get(ctx context.Context, path string) ([]byte, error) {
 }
 
 func (s *Service) do(ctx context.Context, method, path string, body []byte) ([]byte, error) {
-	data, status, err := s.roundTrip(ctx, method, path, body)
-	if err != nil {
-		return nil, err
+	var unauthorized bool
+	for attempt := 0; attempt < 5; attempt++ {
+		data, status, err := s.roundTrip(ctx, method, path, body)
+		if err != nil {
+			var httpErr *HTTPError
+			if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusTooManyRequests && attempt < 4 {
+				if err := sleepCtx(ctx, time.Second); err != nil {
+					return nil, err
+				}
+				continue
+			}
+			return nil, err
+		}
+		if status != http.StatusUnauthorized {
+			return data, nil
+		}
+		if unauthorized {
+			return nil, &HTTPError{StatusCode: status, Path: path, Body: string(data)}
+		}
+		unauthorized = true
+		s.Invalidate()
 	}
-	if status != http.StatusUnauthorized {
-		return data, nil
+	return nil, fmt.Errorf("vkads %s: retries exhausted", path)
+}
+
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
 	}
-	s.Invalidate()
-	data, status, err = s.roundTrip(ctx, method, path, body)
-	if err != nil {
-		return nil, err
+}
+
+func (s *Service) throttle(ctx context.Context) error {
+	s.mu.Lock()
+	wait := s.nextOK.Sub(s.now())
+	if wait < 0 {
+		wait = 0
 	}
-	if status >= 400 {
-		return nil, &HTTPError{StatusCode: status, Path: path, Body: string(data)}
+	s.nextOK = s.now().Add(vkMinRequestGap)
+	s.mu.Unlock()
+	if wait == 0 {
+		return nil
 	}
-	return data, nil
+	return sleepCtx(ctx, wait)
 }
 
 func (s *Service) roundTrip(ctx context.Context, method, path string, body []byte) ([]byte, int, error) {
+	if err := s.throttle(ctx); err != nil {
+		return nil, 0, err
+	}
 	tok, err := s.AccessToken(ctx)
 	if err != nil {
 		return nil, 0, err

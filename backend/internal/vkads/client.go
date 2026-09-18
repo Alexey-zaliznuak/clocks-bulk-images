@@ -1,6 +1,7 @@
 package vkads
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -136,9 +137,47 @@ func (e *AudienceNotFoundError) Error() string {
 type Package struct {
 	ID          int64      `json:"id"`
 	Name        string     `json:"name"`
-	Objective   string     `json:"objective"`
+	Objective   textList   `json:"objective"`
 	PricedGoal  *PriceGoal `json:"priced_goal"`
 	Description string     `json:"description"`
+}
+
+// textList accepts either "community" or ["community","socialengagement"].
+type textList string
+
+func (t *textList) UnmarshalJSON(data []byte) error {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 || string(data) == "null" {
+		*t = ""
+		return nil
+	}
+	if data[0] == '"' {
+		var s string
+		if err := json.Unmarshal(data, &s); err != nil {
+			return err
+		}
+		*t = textList(s)
+		return nil
+	}
+	var items []string
+	if err := json.Unmarshal(data, &items); err != nil {
+		return err
+	}
+	*t = textList(strings.Join(items, " "))
+	return nil
+}
+
+func (t textList) ForAPI() string {
+	fields := strings.Fields(string(t))
+	for _, v := range fields {
+		if strings.EqualFold(v, "community") {
+			return v
+		}
+	}
+	if len(fields) > 0 {
+		return fields[0]
+	}
+	return string(t)
 }
 
 type PriceGoal struct {
@@ -158,6 +197,14 @@ type Pad struct {
 }
 
 func (s *Service) ListPackages(ctx context.Context) ([]Package, error) {
+	s.mu.Lock()
+	if s.packages != nil && s.now().Sub(s.packagesAt) < catalogTTL {
+		out := append([]Package(nil), s.packages...)
+		s.mu.Unlock()
+		return out, nil
+	}
+	s.mu.Unlock()
+
 	var all []Package
 	for offset := 0; ; {
 		env, err := s.getList(ctx, "/api/v2/packages.json", offset, listPageSize)
@@ -179,10 +226,22 @@ func (s *Service) ListPackages(ctx context.Context) ([]Package, error) {
 		}
 		offset += len(page)
 	}
+	s.mu.Lock()
+	s.packages = all
+	s.packagesAt = s.now()
+	s.mu.Unlock()
 	return all, nil
 }
 
 func (s *Service) ListRegions(ctx context.Context) ([]Region, error) {
+	s.mu.Lock()
+	if s.regions != nil && s.now().Sub(s.regionsAt) < catalogTTL {
+		out := append([]Region(nil), s.regions...)
+		s.mu.Unlock()
+		return out, nil
+	}
+	s.mu.Unlock()
+
 	var all []Region
 	for offset := 0; ; {
 		env, err := s.getList(ctx, "/api/v2/regions.json", offset, listPageSize)
@@ -204,6 +263,10 @@ func (s *Service) ListRegions(ctx context.Context) ([]Region, error) {
 		}
 		offset += len(page)
 	}
+	s.mu.Lock()
+	s.regions = all
+	s.regionsAt = s.now()
+	s.mu.Unlock()
 	return all, nil
 }
 
@@ -292,7 +355,7 @@ func PickCommunityMessagePackage(packages []Package, targetAction string) *Packa
 	var fallback *Package
 	for i := range packages {
 		p := &packages[i]
-		blob := p.Objective + " " + p.Name + " " + p.Description
+		blob := string(p.Objective) + " " + p.Name + " " + p.Description
 		community := containsFold(blob, "community", "socialengagement", "социаль", "сообществ", "групп")
 		if !community {
 			continue

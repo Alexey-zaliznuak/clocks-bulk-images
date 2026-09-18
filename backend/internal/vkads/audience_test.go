@@ -1,6 +1,8 @@
 package vkads
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -66,6 +68,20 @@ func TestAgeList(t *testing.T) {
 	got = AgeList(24, 25, true)
 	if got[0] != 0 || len(got) != 3 {
 		t.Fatalf("unknown age = %v", got)
+	}
+}
+
+func TestTextListObjective(t *testing.T) {
+	var one Package
+	if err := json.Unmarshal([]byte(`{"id":1,"objective":"community"}`), &one); err != nil || one.Objective.ForAPI() != "community" {
+		t.Fatalf("string objective: %+v %v", one, err)
+	}
+	var many Package
+	if err := json.Unmarshal([]byte(`{"id":2,"objective":["socialengagement","community"]}`), &many); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(many.Objective), "community") || many.Objective.ForAPI() != "community" {
+		t.Fatalf("array objective = %q", many.Objective)
 	}
 }
 
