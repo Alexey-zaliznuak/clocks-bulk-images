@@ -312,14 +312,19 @@ func (s *Service) ListRegions(ctx context.Context) ([]Region, error) {
 }
 
 func (s *Service) ListPackagePads(ctx context.Context, packageID int64) ([]Pad, error) {
-	extra := url.Values{}
-	if packageID > 0 {
-		extra.Set("_package_id", strconv.FormatInt(packageID, 10))
+	_ = packageID
+	s.mu.Lock()
+	if s.packagePads != nil && s.now().Sub(s.packagePadsAt) < catalogTTL {
+		out := append([]Pad(nil), s.packagePads...)
+		s.mu.Unlock()
+		return out, nil
 	}
+	s.mu.Unlock()
+
 	var all []Pad
 	seen := map[int]struct{}{}
 	for pages, offset := 0, 0; ; pages++ {
-		env, err := s.getListQuery(ctx, "/api/v2/packages_pads.json", offset, listPageSize, extra)
+		env, err := s.getList(ctx, "/api/v2/packages_pads.json", offset, listPageSize)
 		if err != nil {
 			if len(all) > 0 {
 				break
@@ -349,6 +354,10 @@ func (s *Service) ListPackagePads(ctx context.Context, packageID int64) ([]Pad, 
 		}
 		offset += len(page)
 	}
+	s.mu.Lock()
+	s.packagePads = all
+	s.packagePadsAt = s.now()
+	s.mu.Unlock()
 	return all, nil
 }
 

@@ -40,10 +40,12 @@ type Service struct {
 	segmentsAt time.Time
 	packages   []Package
 	packagesAt time.Time
-	regions    []Region
-	regionsAt  time.Time
-	pads       []PadNode
-	padsAt     time.Time
+	regions       []Region
+	regionsAt     time.Time
+	packagePads   []Pad
+	packagePadsAt time.Time
+	pads          []PadNode
+	padsAt        time.Time
 	nextOK     time.Time
 }
 
