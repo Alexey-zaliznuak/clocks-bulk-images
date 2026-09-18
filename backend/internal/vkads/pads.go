@@ -75,6 +75,22 @@ func (s *Service) PadsTreeByID(ctx context.Context, id int64) ([]PadNode, error)
 	return ParsePadsTrees(data), nil
 }
 
+// PackagePlacements returns the pads tree of the package with its leaves
+// named. The tree resource labels its branches only, so the placements arrive
+// as bare ids — unusable in the form and unrecognisable as "the VK feed".
+func (s *Service) PackagePlacements(ctx context.Context, pkg Package) []PadNode {
+	tree := s.PackageTree(ctx, pkg)
+	listed, err := s.ListPackagePads(ctx, pkg.ID)
+	if err != nil {
+		log.Printf("vkads: каталог площадок недоступен: %v", err)
+		return tree
+	}
+	if len(tree) == 0 {
+		return GroupPackagePads(listed)
+	}
+	return LabelPadTree(tree, PadLabels(listed))
+}
+
 // PackageTree returns the pads tree that targetings.pads of this package must
 // belong to. Falling back to a wider set instead is what VK answers with
 // "pad(s) that's not permitted in this pad tree".
@@ -314,14 +330,7 @@ func (s *Service) PlacementTreeForSettings(ctx context.Context, settings Setting
 	if pkg == nil {
 		return nil, fmt.Errorf("vkads: нет пакета для сообщества / отправки сообщения")
 	}
-	scoped := s.PackageTree(ctx, *pkg)
-	if len(scoped) == 0 {
-		listed, err := s.ListPackagePads(ctx, pkg.ID)
-		if err != nil {
-			return nil, err
-		}
-		scoped = GroupPackagePads(listed)
-	}
+	scoped := s.PackagePlacements(ctx, *pkg)
 	// The form must offer exactly what ResolvePads will accept, otherwise a
 	// selection made here is dropped, or worse, rejected by VK on upload.
 	if narrowed := FilterPadTree(scoped, allowedPads(*pkg, scoped)); len(narrowed) > 0 {
@@ -335,6 +344,38 @@ func (s *Service) PlacementTreeForSettings(ctx context.Context, settings Setting
 		Trees:   PrunePadTree(scoped),
 		Default: defaults,
 	}, nil
+}
+
+// PadLabels maps placement ids to the human names of packages_pads.json. The
+// pads tree itself only names its branches, so without this the leaves read as
+// bare numbers — and the feed cannot be recognised by name either.
+func PadLabels(pads []Pad) map[int]string {
+	out := make(map[int]string, len(pads))
+	for _, pad := range pads {
+		if pad.ID <= 0 {
+			continue
+		}
+		if label := firstNonEmpty(pad.Description, pad.Name); label != "" {
+			out[pad.ID] = label
+		}
+	}
+	return out
+}
+
+// LabelPadTree names the unnamed leaves of a tree from the placement catalogue.
+func LabelPadTree(nodes []PadNode, labels map[int]string) []PadNode {
+	if len(labels) == 0 {
+		return nodes
+	}
+	out := make([]PadNode, 0, len(nodes))
+	for _, node := range nodes {
+		node.Children = LabelPadTree(node.Children, labels)
+		if node.Name == "" && len(node.Pads) == 1 {
+			node.Name = labels[node.Pads[0]]
+		}
+		out = append(out, node)
+	}
+	return out
 }
 
 // FilterPadTree keeps only the placements of allowed, dropping the branches

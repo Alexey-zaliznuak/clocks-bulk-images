@@ -11,7 +11,7 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import { formatDuration } from "../format";
 import { DEFAULT_VIDEO_MODEL } from "../settings";
 import PadsTree from "../components/PadsTree";
-import { type PadNode } from "../padsTree";
+import { collectAllPads, type PadNode } from "../padsTree";
 import { defaultVKSettings, parseOptionalNumber, type VKSettings } from "../vkSettings";
 
 type ListTab = "names" | "surnames";
@@ -109,15 +109,24 @@ export default function CampaignCreate() {
     api.vkAdsPads(vkSettings.targetAction)
       .then((res) => {
         if (!current) return;
-        setPadTrees(res.trees || []);
+        const trees = res.trees || [];
+        setPadTrees(trees);
         setPadsPackage(res.packageName || "");
         setPadsError("");
-        // Preselect the VK feed once, and only while nothing is chosen, so
-        // clearing every checkbox stays a deliberate choice.
-        if (!padsTouched.current && res.defaultPads?.length) {
-          padsTouched.current = true;
-          setVkSettings((s) => (s.pads?.length ? s : { ...s, pads: res.defaultPads || [] }));
-        }
+        // Saved settings can carry placements of another package, which VK
+        // rejects on upload. Drop them, then preselect the VK feed once — and
+        // only while nothing is chosen, so clearing every checkbox stays a
+        // deliberate choice.
+        const offered = new Set(collectAllPads(trees));
+        const preselect = padsTouched.current ? [] : res.defaultPads || [];
+        padsTouched.current = true;
+        setVkSettings((s) => {
+          const kept = (s.pads || []).filter((id) => offered.has(id));
+          const next = kept.length ? kept : preselect;
+          return next.length === (s.pads || []).length && next.every((id, i) => id === s.pads?.[i])
+            ? s
+            : { ...s, pads: next };
+        });
       })
       .catch((e) => {
         if (current) setPadsError(e instanceof Error ? e.message : "Не удалось загрузить площадки");

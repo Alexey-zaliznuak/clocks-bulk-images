@@ -191,6 +191,24 @@ func TestResolvePadsDropsPadsOutsideThePackage(t *testing.T) {
 	}
 }
 
+func TestLabelPadTreeNamesBareLeaves(t *testing.T) {
+	tree := []PadNode{{ID: "Вконтакте_1", Name: "Вконтакте", Children: []PadNode{
+		{ID: "1265106_2", Pads: []int{1265106}},
+		{ID: "1010345_3", Pads: []int{1010345}},
+	}}}
+	labels := PadLabels([]Pad{
+		{ID: 1265106, Name: "vk_feed", Description: "Лента ВКонтакте"},
+		{ID: 1010345, Name: "vk_instream"},
+	})
+	got := LabelPadTree(tree, labels)
+	if got[0].Children[0].Name != "Лента ВКонтакте" || got[0].Children[1].Name != "vk_instream" {
+		t.Fatalf("labels = %#v", got[0].Children)
+	}
+	if ids := PickVKFeedPadIDs(got); len(ids) != 1 || ids[0] != 1265106 {
+		t.Fatalf("named tree must expose the feed, got %v", ids)
+	}
+}
+
 func TestPrunePadTreeDropsEmptyAndMergesDuplicates(t *testing.T) {
 	got := PrunePadTree([]PadNode{
 		{ID: "1", Name: "Площадки", Children: []PadNode{

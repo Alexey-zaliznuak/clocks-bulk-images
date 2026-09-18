@@ -34,7 +34,7 @@ func (s *Service) ResolveCatalog(ctx context.Context, settings Settings, created
 		return nil, err
 	}
 	russia := PickRussiaRegion(regions)
-	tree := s.PackageTree(ctx, *pkg)
+	tree := s.PackagePlacements(ctx, *pkg)
 	pads := ResolvePadsInTree(settings.Pads, *pkg, tree)
 	if len(pads) == 0 {
 		listed, err := s.ListPackagePads(ctx, pkg.ID)
