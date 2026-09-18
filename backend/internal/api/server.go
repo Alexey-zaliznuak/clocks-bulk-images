@@ -119,6 +119,7 @@ func (s *Server) Router() http.Handler {
 		pr.Get("/api/ad-campaigns/{id}", s.handleGetAdCampaign)
 		pr.Get("/api/ad-campaigns/{id}/items", s.handleListAdCampaignItems)
 		pr.Post("/api/ad-campaigns/{id}/start", s.handleStartAdCampaign)
+		pr.Post("/api/ad-campaigns/{id}/ignore-failed", s.handleIgnoreAdCampaignFailures)
 		pr.Post("/api/ad-campaigns/{id}/retry", s.handleRetryAdCampaign)
 		pr.Post("/api/ad-campaigns/items/{id}/retry", s.handleRetryAdCampaignItem)
 		pr.Delete("/api/ad-campaigns/{id}", s.handleDeleteAdCampaign)

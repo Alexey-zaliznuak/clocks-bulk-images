@@ -7,12 +7,14 @@ export default function PadsTree({
   onChange,
   loading,
   error,
+  readOnly,
 }: {
   trees: PadNode[];
   selected: number[];
-  onChange: (pads: number[]) => void;
+  onChange?: (pads: number[]) => void;
   loading?: boolean;
   error?: string;
+  readOnly?: boolean;
 }) {
   const selectedSet = useMemo(() => new Set(selected), [selected]);
   const [open, setOpen] = useState<Set<string>>(() => defaultOpen(trees));
@@ -56,7 +58,10 @@ export default function PadsTree({
               return next;
             });
           }}
-          onToggle={(nextNode) => onChange(toggleNode(nextNode, selected))}
+          onToggle={(nextNode) => {
+            if (!readOnly && onChange) onChange(toggleNode(nextNode, selected));
+          }}
+          readOnly={readOnly}
         />
       ))}
     </div>
@@ -70,6 +75,7 @@ function Branch({
   open,
   onToggleOpen,
   onToggle,
+  readOnly,
 }: {
   node: PadNode;
   depth: number;
@@ -77,6 +83,7 @@ function Branch({
   open: Set<string>;
   onToggleOpen: (id: string) => void;
   onToggle: (node: PadNode) => void;
+  readOnly?: boolean;
 }) {
   const children = node.children || [];
   const key = node.id || node.name;
@@ -106,13 +113,13 @@ function Branch({
         ) : (
           <span className="inline-block w-6" />
         )}
-        <label className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 ${pads.length === 0 ? "opacity-60" : ""}`}>
+        <label className={`flex min-w-0 flex-1 items-center gap-2 ${readOnly ? "" : "cursor-pointer"} ${pads.length === 0 ? "opacity-60" : ""}`}>
           <input
             ref={boxRef}
             type="checkbox"
             className="h-4 w-4"
             checked={state === "all"}
-            disabled={pads.length === 0}
+            disabled={readOnly || pads.length === 0}
             onChange={() => onToggle(node)}
           />
           <span className="truncate text-sm text-slate-800">{node.name}</span>
@@ -127,6 +134,7 @@ function Branch({
           open={open}
           onToggleOpen={onToggleOpen}
           onToggle={onToggle}
+          readOnly={readOnly}
         />
       ))}
     </div>

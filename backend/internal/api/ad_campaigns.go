@@ -234,27 +234,52 @@ func (s *Server) handleStartAdCampaign(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "running", "queued": n})
 }
 
+func (s *Server) handleIgnoreAdCampaignFailures(w http.ResponseWriter, r *http.Request) {
+	err := s.store.IgnoreAdCampaignFailures(r.Context(), chi.URLParam(r, "id"))
+	switch {
+	case err == sql.ErrNoRows:
+		writeError(w, http.StatusNotFound, "ad campaign not found")
+	case errors.Is(err, store.ErrCampaignNotRunning):
+		writeError(w, http.StatusConflict, "кампания ещё не запущена или уже завершена")
+	case errors.Is(err, store.ErrCampaignInProgress):
+		writeError(w, http.StatusConflict, "дождитесь окончания всех задач: они должны быть либо готовы, либо в ошибке")
+	case errors.Is(err, store.ErrNothingToUpload):
+		writeError(w, http.StatusConflict, "нет успешных задач для загрузки в ВКР")
+	case err != nil:
+		log.Printf("api: ignore campaign failures: %v", err)
+		writeError(w, http.StatusInternalServerError, "could not ignore campaign failures")
+	default:
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ignored"})
+	}
+}
+
 func (s *Server) handleRetryAdCampaign(w http.ResponseWriter, r *http.Request) {
 	n, err := s.store.RetryAdCampaign(r.Context(), chi.URLParam(r, "id"))
-	if err != nil {
+	switch {
+	case err == sql.ErrNoRows:
+		writeError(w, http.StatusNotFound, "ad campaign not found")
+	case errors.Is(err, store.ErrCampaignUploadStarted):
+		writeError(w, http.StatusConflict, err.Error())
+	case err != nil:
 		writeError(w, http.StatusInternalServerError, "could not retry ad campaign")
-		return
+	default:
+		writeJSON(w, http.StatusOK, map[string]any{"retried": n})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"retried": n})
 }
 
 func (s *Server) handleRetryAdCampaignItem(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	status, err := s.store.RetryAdCampaignItem(r.Context(), id)
-	if err != nil {
+	switch {
+	case errors.Is(err, store.ErrCampaignUploadStarted):
+		writeError(w, http.StatusConflict, err.Error())
+	case err != nil:
 		writeError(w, http.StatusInternalServerError, "could not retry ad campaign item")
-		return
-	}
-	if status == "" {
+	case status == "":
 		writeError(w, http.StatusConflict, "item not found or not in failed state")
-		return
+	default:
+		writeJSON(w, http.StatusOK, map[string]any{"id": id, "status": status})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": id, "status": status})
 }
 
 func (s *Server) handleDeleteAdCampaign(w http.ResponseWriter, r *http.Request) {

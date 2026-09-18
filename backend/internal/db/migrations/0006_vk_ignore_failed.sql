@@ -1,0 +1,1 @@
+ALTER TABLE ad_campaigns ADD COLUMN IF NOT EXISTS vk_ignore_failed BOOLEAN NOT NULL DEFAULT false;

@@ -69,11 +69,7 @@ func (w *Worker) doVKUpload(ctx context.Context, campaign *store.AdCampaign) err
 		if item.VKAdGroupID != "" {
 			continue
 		}
-		groupName := item.Value
-		if item.Kind == "surname" {
-			groupName = "Фамилия " + item.Value
-		}
-		id, err := w.vkads.CreateAdGroup(ctx, vkads.GroupBody(groupName, planID, item.AudienceID, settings, cat))
+		id, err := w.vkads.CreateAdGroup(ctx, vkads.GroupBody(item.Value, planID, item.AudienceID, settings, cat))
 		if err != nil {
 			last = fmt.Errorf("группа %q: %w", item.Value, err)
 			log.Printf("worker: vk group %s/%s: %v", campaign.ID, item.Value, err)

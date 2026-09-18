@@ -11,7 +11,6 @@ func TestMatchAudienceExactCaseInsensitive(t *testing.T) {
 	items := []Segment{
 		{ID: 1, Name: "Иван", Created: older},
 		{ID: 2, Name: "иван", Created: newer},
-		{ID: 3, Name: "Иван ", Created: newer.Add(time.Hour)},
 		{ID: 4, Name: "Иван_ауд", Created: newer.Add(2 * time.Hour)},
 		{ID: 5, Name: "Мария", Created: newer},
 	}
@@ -19,8 +18,14 @@ func TestMatchAudienceExactCaseInsensitive(t *testing.T) {
 	if got == nil || got.ID != 2 {
 		t.Fatalf("got %#v, want newest exact Иван", got)
 	}
-	if MatchAudience("Иван ", items) == nil {
-		t.Fatal("value with trailing space should only match an audience that also has it")
+	if MatchAudience(" Иван ", items) == nil || MatchAudience(" Иван ", items).ID != 2 {
+		t.Fatal("spaces around the name should still be an exact match")
+	}
+	if MatchAudience("Аудитория Гущинов", []Segment{{ID: 9, Name: "гущин"}}) != nil {
+		t.Fatal("substring must not match")
+	}
+	if MatchAudience("Гущин", []Segment{{ID: 9, Name: "Аудитория Гущинов"}}) != nil {
+		t.Fatal("Аудитория Гущинов is not an exact Гущин")
 	}
 	if MatchAudience("Пётр", items) != nil {
 		t.Fatal("missing name must not match")

@@ -204,6 +204,9 @@ export interface AdCampaign {
   vkSettings?: import("./vkSettings").VKSettings;
   vkAdPlanId?: string;
   vkUploadError?: string;
+  vkIgnoreFailed?: boolean;
+  names?: string[];
+  surnames?: string[];
 }
 
 export interface AdCampaignItem {
@@ -344,6 +347,11 @@ export const api = {
 
   startAdCampaign: (id: string) =>
     request<{ status: string; queued: number }>(`/api/ad-campaigns/${id}/start`, {
+      method: "POST",
+    }),
+
+  ignoreAdCampaignFailures: (id: string) =>
+    request<{ status: string }>(`/api/ad-campaigns/${id}/ignore-failed`, {
       method: "POST",
     }),
 

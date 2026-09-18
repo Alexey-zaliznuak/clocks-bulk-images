@@ -23,6 +23,7 @@ type listEnvelope struct {
 	Count  int             `json:"count"`
 	Items  json.RawMessage `json:"items"`
 	Offset int             `json:"offset"`
+	Limit  int             `json:"limit"`
 }
 
 func (s *Service) getList(ctx context.Context, path string, offset, limit int) (listEnvelope, error) {
@@ -70,8 +71,8 @@ func (s *Service) ListSegments(ctx context.Context) ([]Segment, error) {
 	s.mu.Unlock()
 
 	var all []Segment
-	for offset := 0; ; offset += 50 {
-		env, err := s.getList(ctx, "/api/v2/remarketing/segments.json", offset, 50)
+	for offset := 0; ; {
+		env, err := s.getList(ctx, "/api/v2/remarketing/segments.json", offset, 100)
 		if err != nil {
 			return nil, err
 		}
@@ -81,12 +82,16 @@ func (s *Service) ListSegments(ctx context.Context) ([]Segment, error) {
 				return nil, fmt.Errorf("vkads segments: %w", err)
 			}
 		}
+		if len(raw) == 0 {
+			break
+		}
 		for _, item := range raw {
 			all = append(all, Segment{ID: item.ID, Name: item.Name, Created: parseCreated(item.Created)})
 		}
-		if len(raw) < 50 || (env.Count > 0 && len(all) >= env.Count) {
+		if env.Count > 0 && len(all) >= env.Count {
 			break
 		}
+		offset += len(raw)
 	}
 	s.mu.Lock()
 	s.segments = all

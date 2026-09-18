@@ -2,8 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, type AdCampaign, type AdCampaignItem } from "../api";
 import ConfirmDialog from "../components/ConfirmDialog";
+import CampaignSettingsView from "../components/CampaignSettingsView";
 import { formatRub, formatUsd } from "../format";
-import { padLabels, type PadNode } from "../padsTree";
+import { type PadNode } from "../padsTree";
 import { statusClasses, statusLabel } from "../status";
 import { lifecycleClasses, lifecycleLabel } from "./Campaigns";
 
@@ -27,6 +28,8 @@ export default function CampaignDetail() {
   const [deleting, setDeleting] = useState(false);
   const [retryingAll, setRetryingAll] = useState(false);
   const [retryingItem, setRetryingItem] = useState<string | null>(null);
+  const [ignoreOpen, setIgnoreOpen] = useState(false);
+  const [ignoring, setIgnoring] = useState(false);
   const [message, setMessage] = useState("");
   const [padTrees, setPadTrees] = useState<PadNode[]>([]);
 
@@ -99,6 +102,21 @@ export default function CampaignDetail() {
     }
   }
 
+  async function ignoreFailed() {
+    setIgnoring(true);
+    setError("");
+    try {
+      await api.ignoreAdCampaignFailures(id);
+      setMessage("Ошибки проигнорированы — загружаем в ВКР только успешные задачи");
+      setIgnoreOpen(false);
+      await Promise.all([loadCampaign(), loadItems()]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось проигнорировать ошибки");
+    } finally {
+      setIgnoring(false);
+    }
+  }
+
   async function retryAll() {
     setRetryingAll(true);
     setError("");
@@ -148,6 +166,17 @@ export default function CampaignDetail() {
     );
   }
 
+  const allTerminal = campaign.total > 0 && campaign.done + campaign.failed === campaign.total;
+  const waitingToIgnore =
+    allTerminal
+    && campaign.failed > 0
+    && campaign.done > 0
+    && !campaign.vkIgnoreFailed
+    && campaign.lifecycle !== "completed"
+    && campaign.lifecycle !== "draft";
+  const showUploading = campaign.lifecycle === "uploading" && !waitingToIgnore;
+  const canRetry = campaign.lifecycle === "running" && !campaign.vkIgnoreFailed && !campaign.vkAdPlanId;
+
   return (
     <div className="space-y-5">
       <header className="flex flex-wrap items-center gap-3">
@@ -172,12 +201,29 @@ export default function CampaignDetail() {
       {error && <ErrorBox>{error}</ErrorBox>}
       {message && <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</div>}
 
-      {campaign.lifecycle === "uploading" && (
+      {showUploading && (
         <section className="rounded-2xl border border-violet-200 bg-violet-50 p-5">
           <h2 className="font-semibold text-violet-900">Загрузка в VK Рекламу</h2>
           <p className="mt-1 text-sm text-violet-800">
             Создаём кампанию и группы. Объявления с видео в этом шаге не создаются.
           </p>
+        </section>
+      )}
+
+      {waitingToIgnore && (
+        <section className="rounded-2xl border border-amber-300 bg-amber-50 p-5">
+          <h2 className="font-semibold text-amber-900">Генерация закончилась с ошибками</h2>
+          <p className="mt-1 text-sm text-amber-800">
+            В кабинет автоматически уйдут только кампании, где все имена и фамилии успешны.
+            Можно проигнорировать {campaign.failed} {campaign.failed === 1 ? "ошибку" : "ошибок"} и загрузить {campaign.done} готовых задач.
+          </p>
+          <button
+            type="button"
+            onClick={() => setIgnoreOpen(true)}
+            className="mt-4 rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-500"
+          >
+            Игнорировать ошибки и загрузить в ВКР
+          </button>
         </section>
       )}
 
@@ -204,50 +250,10 @@ export default function CampaignDetail() {
         <SummaryCard label="Стоимость" value={formatRub(campaign.costRub)} hint={formatUsd(campaign.costUsd)} tone="default" />
       </section>
 
-      <details className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-900">
-          Параметры кампании — только просмотр
-        </summary>
-        <div className="grid gap-4 border-t border-slate-100 p-4 md:grid-cols-2">
-          <ReadField label="Заголовок объявления" value={campaign.vkSettings?.bannerTitle || "—"} />
-          <ReadField label="Надпись на кнопке" value={campaign.vkSettings?.bannerCta || "—"} />
-          <ReadField label="Описание для имён" value={campaign.nameTextTemplate} multiline />
-          <ReadField label="Описание для фамилий" value={campaign.surnameTextTemplate} multiline />
-          <ReadField label="ID шаблона Иманатора" value={campaign.templateId} />
-          <ReadField label="Ключ подстановки" value={campaign.nameSettingKey} />
-          <ReadField label="Модель видео" value={campaign.videoModel} />
-          <ReadField label="Промпт для видео" value={campaign.videoPrompt} multiline />
-          <ReadField label="Длительность" value={campaign.videoDuration == null ? "авто" : `${campaign.videoDuration} сек`} />
-          <ReadField label="Разрешение / соотношение" value={`${campaign.videoResolution || "авто"} / ${campaign.videoAspectRatio || "авто"}`} />
-          <ReadField label="Звук" value={campaign.generateAudio ? "Генерируется моделью" : `Медиа: ${campaign.audioAssetId || "—"}`} />
-          <ReadField label="Настройки изображения" value={JSON.stringify(campaign.imageSettings, null, 2)} multiline />
-          <ReadField label="ID кампании ВКР" value={campaign.vkAdPlanId || "ещё не создана"} />
-          <ReadField
-            label="Сообщество / действие"
-            value={`${campaign.vkSettings?.communityId ?? "—"} / ${campaign.vkSettings?.targetAction === "send_message" ? "Отправка сообщения" : campaign.vkSettings?.targetAction || "—"}`}
-          />
-          <ReadField
-            label="Бюджет"
-            value={`день ${campaign.vkSettings?.budgetDay ?? "—"} ₽, всего ${campaign.vkSettings?.budgetTotal ?? "не задан"}, стратегия ${campaign.vkSettings?.biddingStrategy || "—"}`}
-          />
-          <ReadField
-            label="Демография"
-            value={`${campaign.vkSettings?.sex === "female" ? "женский" : campaign.vkSettings?.sex === "all" ? "все" : "мужской"}, ${campaign.vkSettings?.ageFrom ?? 24}–${campaign.vkSettings?.ageTo ?? 65}, ${campaign.vkSettings?.ageRestrictions || "0+"}`}
-          />
-          <ReadField
-            label="Места размещения"
-            value={
-              campaign.vkSettings?.pads?.length
-                ? (padLabels(padTrees, campaign.vkSettings.pads).join(", ") || campaign.vkSettings.pads.join(", "))
-                : "лента ВК (по умолчанию)"
-            }
-          />
-          <ReadField label="REF-метки" value={campaign.vkSettings?.refTags || "—"} />
-          {campaign.vkUploadError && (
-            <ReadField label="Ошибка загрузки в ВКР" value={campaign.vkUploadError} multiline />
-          )}
-        </div>
-      </details>
+      <CampaignSettingsView
+        campaign={campaign}
+        padTrees={padTrees}
+      />
 
       <section className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -255,7 +261,7 @@ export default function CampaignDetail() {
             <h2 className="text-lg font-semibold text-slate-900">Задачи</h2>
             <p className="text-xs text-slate-500">Показано {items.length} из {total}</p>
           </div>
-          {campaign.failed > 0 && (
+          {canRetry && campaign.failed > 0 && (
             <button
               type="button"
               onClick={() => void retryAll()}
@@ -308,7 +314,7 @@ export default function CampaignDetail() {
                         {statusLabel(item.status)}
                       </span>
                       {item.error && <p className="mt-1 max-w-xs text-xs text-red-600" title={item.error}>{item.error}</p>}
-                      {item.status === "failed" && (
+                      {item.status === "failed" && canRetry && (
                         <button
                           type="button"
                           onClick={() => void retryItem(item.id)}
@@ -369,6 +375,17 @@ export default function CampaignDetail() {
           Будут запущены {campaign.total} платных задач. После запуска изменить настройки кампании нельзя.
         </p>
       </ConfirmDialog>
+      <ConfirmDialog
+        open={ignoreOpen}
+        title="Игнорировать ошибки и загрузить в ВКР?"
+        confirmLabel={ignoring ? "Загружаем…" : "Игнорировать и загрузить"}
+        onCancel={() => !ignoring && setIgnoreOpen(false)}
+        onConfirm={() => void ignoreFailed()}
+      >
+        <p>
+          В кабинет уйдут только {campaign.done} успешных задач. {campaign.failed} с ошибками останутся без групп.
+        </p>
+      </ConfirmDialog>
     </div>
   );
 }
@@ -396,19 +413,6 @@ function SummaryCard({ label, value, hint, tone }: { label: string; value: strin
   );
 }
 
-function ReadField({ label, value, multiline }: { label: string; value: string; multiline?: boolean }) {
-  return (
-    <label className="block">
-      <span className="mb-1 block text-xs text-slate-500">{label}</span>
-      {multiline ? (
-        <textarea className={`${readCls} min-h-24`} value={value} readOnly />
-      ) : (
-        <input className={readCls} value={value} readOnly />
-      )}
-    </label>
-  );
-}
-
 function FilterButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button
@@ -428,5 +432,4 @@ function ErrorBox({ children }: { children: React.ReactNode }) {
 }
 
 const thCls = "px-4 py-2.5 text-left font-medium";
-const readCls = "w-full cursor-not-allowed rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-600";
 const pageButtonCls = "rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:border-blue-300 disabled:opacity-40";
