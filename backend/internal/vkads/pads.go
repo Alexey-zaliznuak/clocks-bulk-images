@@ -173,7 +173,7 @@ func convertNode(raw rawPadNode, leafIDsArePads bool) PadNode {
 // of the package.
 func ResolvePads(selected []int, pkg Package, trees []PadNode) []int {
 	tree := padsTreeForPackage(pkg, trees)
-	allowed := intSet(append(CollectPadIDs(tree), PackagePadIDs(pkg)...))
+	allowed := allowedPads(pkg, tree)
 	if len(allowed) == 0 {
 		return nil
 	}
@@ -189,18 +189,43 @@ func ResolvePads(selected []int, pkg Package, trees []PadNode) []int {
 	return intersectPadIDs(feed, allowed)
 }
 
-// PackagePadIDs lists every placement the package describes in its options,
-// whether as plain values, as the cabinet preselection or as the per-pad
-// pattern allow-list.
-func PackagePadIDs(pkg Package) []int {
-	values, defaults := ParsePackagePadOptions(pkg.Options)
-	ids := append(append([]int(nil), values...), defaults...)
-	fromPatterns := make([]int, 0, len(ParsePackagePadPatterns(pkg.Options)))
-	for pad := range ParsePackagePadPatterns(pkg.Options) {
-		fromPatterns = append(fromPatterns, pad)
+// allowedPads narrows the package tree by what the package itself sells. Both
+// halves are needed: the tree alone still holds placements this package does
+// not offer, and the options alone may name placements of another tree, which
+// VK answers with "pad(s) that's not permitted in this pad tree".
+func allowedPads(pkg Package, tree []PadNode) map[int]struct{} {
+	fromTree := CollectPadIDs(tree)
+	fromPackage := PackagePadIDs(pkg)
+	if len(fromTree) == 0 {
+		return intSet(fromPackage)
 	}
-	sort.Ints(fromPatterns)
-	return uniqueInts(append(ids, fromPatterns...))
+	if len(fromPackage) == 0 {
+		return intSet(fromTree)
+	}
+	if both := intersectPadIDs(fromTree, intSet(fromPackage)); len(both) > 0 {
+		return intSet(both)
+	}
+	return intSet(fromTree)
+}
+
+// PackagePadIDs lists the placements this package sells. The per-pad pattern
+// map is the precise answer — it spells out which banner patterns run on which
+// placement — while options.targetings[pads].values is merely everything the
+// pads targeting accepts cabinet-wide and must not be read as an allow-list.
+func PackagePadIDs(pkg Package) []int {
+	if byPad := ParsePackagePadPatterns(pkg.Options); len(byPad) > 0 {
+		ids := make([]int, 0, len(byPad))
+		for pad := range byPad {
+			ids = append(ids, pad)
+		}
+		sort.Ints(ids)
+		return ids
+	}
+	values, defaults := ParsePackagePadOptions(pkg.Options)
+	if len(defaults) > 0 {
+		return defaults
+	}
+	return values
 }
 
 // ParsePackagePadOptions splits options.targetings[pads] into every placement
@@ -262,12 +287,12 @@ func (s *Service) PlacementTreeForSettings(ctx context.Context, settings Setting
 		}
 		scoped = GroupPackagePads(listed)
 	}
-	values, defaults := ParsePackagePadOptions(pkg.Options)
-	if len(values) > 0 {
-		if narrowed := FilterPadTree(scoped, intSet(values)); len(narrowed) > 0 {
-			scoped = narrowed
-		}
+	// The form must offer exactly what ResolvePads will accept, otherwise a
+	// selection made here is dropped, or worse, rejected by VK on upload.
+	if narrowed := FilterPadTree(scoped, allowedPads(*pkg, scoped)); len(narrowed) > 0 {
+		scoped = narrowed
 	}
+	_, defaults := ParsePackagePadOptions(pkg.Options)
 	return &PlacementOptions{
 		Package: *pkg,
 		Trees:   PrunePadTree(scoped),

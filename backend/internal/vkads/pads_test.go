@@ -149,10 +149,26 @@ func TestResolvePadsFallsBackToCabinetFeedWhenTreeMissing(t *testing.T) {
 	}
 }
 
-func TestPackagePadIDsReadsPatternMap(t *testing.T) {
-	pkg := Package{Options: []byte(`{"targetings":[{"name":"pads","patterns":[{"pad":"1265106","patterns":[{"id":486}]},{"pad":"1010345","patterns":[{"id":145}]}]}]}`)}
+func TestPackagePadIDsPrefersPatternMapOverValues(t *testing.T) {
+	// values lists everything the pads targeting accepts cabinet-wide, so it
+	// must lose to the per-pad map, which is specific to this package.
+	pkg := Package{Options: []byte(`{"targetings":[{"name":"pads","values":[1265106,1010345,2263324,38277],"patterns":[{"pad":"1265106","patterns":[{"id":486}]},{"pad":"1010345","patterns":[{"id":145}]}]}]}`)}
 	got := PackagePadIDs(pkg)
 	if len(got) != 2 || got[0] != 1010345 || got[1] != 1265106 {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestResolvePadsDropsPadsOutsideThePackage(t *testing.T) {
+	// A selection made before the form was narrowed: most of these belong to
+	// other packages and VK answers "not permitted in this pad tree".
+	pkg := Package{
+		ID:         3122,
+		PadsTreeID: 27,
+		Options:    []byte(`{"targetings":[{"name":"pads","patterns":[{"pad":"1265106","patterns":[{"id":486}]},{"pad":"1010345","patterns":[{"id":145}]}]}]}`),
+	}
+	got := ResolvePads([]int{2263324, 38277, 1265106, 2230567, 1302973}, pkg, cabinetVKTree())
+	if len(got) != 1 || got[0] != 1265106 {
 		t.Fatalf("got %v", got)
 	}
 }
