@@ -103,13 +103,13 @@ func Load() *Config {
 		OpenRouterProxyURL:        env("OPENROUTER_PROXY_URL", ""),
 		OpenRouterTimeout:         time.Duration(envInt("OPENROUTER_TIMEOUT_SECONDS", 120)) * time.Second,
 
-		WorkerConcurrency: envInt("WORKER_CONCURRENCY", 4),
+		WorkerConcurrency: envInt("WORKER_CONCURRENCY", 8),
 		PollInterval:      time.Duration(envInt("POLL_INTERVAL_SECONDS", 2)) * time.Second,
 		StageTimeout:      time.Duration(envInt("STAGE_TIMEOUT_SECONDS", 1800)) * time.Second,
 		LeaseTimeout:      time.Duration(envInt("LEASE_TIMEOUT_SECONDS", 90)) * time.Second,
 		MaxTaskAttempts:   envInt("MAX_TASK_ATTEMPTS", 5),
 
-		FFmpegConcurrency:     envInt("FFMPEG_CONCURRENCY", 2),
+		FFmpegConcurrency:     envInt("FFMPEG_CONCURRENCY", 3),
 		MediaTmpDir:           env("MEDIA_TMP_DIR", ""),
 		MediaStretchMode:      env("MEDIA_STRETCH_MODE", "interpolate"),
 		MediaMaxStretchFactor: envFloat("MEDIA_MAX_STRETCH_FACTOR", 6),
