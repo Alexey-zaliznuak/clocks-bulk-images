@@ -38,4 +38,7 @@ func TestHasNamePlaceholder(t *testing.T) {
 	if !HasNamePlaceholder("Для {{name}}") || HasNamePlaceholder("Для name") {
 		t.Fatal("placeholder validation failed")
 	}
+	if RenderNameText("Для {{name}}", "Аркадий") != "Для Аркадий" {
+		t.Fatal(RenderNameText("Для {{name}}", "Аркадий"))
+	}
 }

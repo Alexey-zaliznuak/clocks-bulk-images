@@ -1,0 +1,1 @@
+ALTER TABLE ad_campaign_items ADD COLUMN IF NOT EXISTS vk_banner_id TEXT NOT NULL DEFAULT '';

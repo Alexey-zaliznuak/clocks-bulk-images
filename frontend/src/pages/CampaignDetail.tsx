@@ -295,6 +295,7 @@ export default function CampaignDetail() {
                   <th className={thCls}>Статус</th>
                   <th className={thCls}>Аудитория</th>
                   <th className={thCls}>Группа ВКР</th>
+                  <th className={thCls}>Объявление ВКР</th>
                   <th className={thCls}>Картинка</th>
                   <th className={thCls}>Исходное видео</th>
                   <th className={thCls}>Преобразованное видео</th>
@@ -329,6 +330,7 @@ export default function CampaignDetail() {
                       {item.audienceName || (item.audienceId ? String(item.audienceId) : "—")}
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-600">{item.vkAdGroupId || "—"}</td>
+                    <td className="px-4 py-3 text-xs text-slate-600">{item.vkBannerId || "—"}</td>
                     <DownloadCell url={item.imageDownloadUrl} label="Скачать картинку" />
                     <DownloadCell url={item.sourceDownloadUrl} label="Скачать исходное видео" />
                     <DownloadCell url={item.videoDownloadUrl} label="Скачать преобразованное видео" />

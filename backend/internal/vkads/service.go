@@ -30,23 +30,26 @@ type Service struct {
 	account string
 	adsURL  string
 	skew    time.Duration
-	http    *http.Client
-	now     func() time.Time
+	http       *http.Client
+	uploadHTTP *http.Client
+	now        func() time.Time
 
-	mu         sync.Mutex
-	zaleyTok   cached
-	vkTok      cached
-	segments   []Segment
-	segmentsAt time.Time
-	packages   []Package
-	packagesAt time.Time
+	mu            sync.Mutex
+	zaleyTok      cached
+	vkTok         cached
+	segments      []Segment
+	segmentsAt    time.Time
+	packages      []Package
+	packagesAt    time.Time
 	regions       []Region
 	regionsAt     time.Time
 	packagePads   []Pad
 	packagePadsAt time.Time
 	pads          []PadNode
 	padsAt        time.Time
-	nextOK     time.Time
+	patterns      []BannerPattern
+	patternsAt    time.Time
+	nextOK        time.Time
 }
 
 type cached struct {
@@ -92,8 +95,9 @@ func New(cfg Config) *Service {
 		account: account,
 		adsURL:  strings.TrimRight(cfg.AdsBaseURL, "/"),
 		skew:    skew,
-		http:    &http.Client{Timeout: timeout},
-		now:     now,
+		http:       &http.Client{Timeout: timeout},
+		uploadHTTP: &http.Client{Timeout: 10 * time.Minute},
+		now:        now,
 	}
 }
 
@@ -207,6 +211,25 @@ func (s *Service) Get(ctx context.Context, path string) ([]byte, error) {
 	return s.do(ctx, http.MethodGet, path, nil)
 }
 
+func (s *Service) PostMultipart(ctx context.Context, path, contentType string, body []byte) ([]byte, error) {
+	var unauthorized bool
+	for attempt := 0; attempt < 3; attempt++ {
+		data, status, err := s.roundTripTyped(ctx, http.MethodPost, path, body, contentType, s.uploadHTTP)
+		if err != nil {
+			return nil, err
+		}
+		if status != http.StatusUnauthorized {
+			return data, nil
+		}
+		if unauthorized {
+			return nil, &HTTPError{StatusCode: status, Path: path, Body: string(data)}
+		}
+		unauthorized = true
+		s.Invalidate()
+	}
+	return nil, fmt.Errorf("vkads %s: retries exhausted", path)
+}
+
 func (s *Service) do(ctx context.Context, method, path string, body []byte) ([]byte, error) {
 	var unauthorized bool
 	for attempt := 0; attempt < 5; attempt++ {
@@ -259,6 +282,10 @@ func (s *Service) throttle(ctx context.Context) error {
 }
 
 func (s *Service) roundTrip(ctx context.Context, method, path string, body []byte) ([]byte, int, error) {
+	return s.roundTripTyped(ctx, method, path, body, "", s.http)
+}
+
+func (s *Service) roundTripTyped(ctx context.Context, method, path string, body []byte, contentType string, client *http.Client) ([]byte, int, error) {
 	if err := s.throttle(ctx); err != nil {
 		return nil, 0, err
 	}
@@ -277,9 +304,15 @@ func (s *Service) roundTrip(ctx context.Context, method, path string, body []byt
 	req.Header.Set("Authorization", "Bearer "+tok)
 	req.Header.Set("Accept", "application/json")
 	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+		if contentType == "" {
+			contentType = "application/json"
+		}
+		req.Header.Set("Content-Type", contentType)
 	}
-	resp, err := s.http.Do(req)
+	if client == nil {
+		client = s.http
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, 0, err
 	}

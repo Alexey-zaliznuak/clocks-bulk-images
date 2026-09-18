@@ -225,6 +225,7 @@ export interface AdCampaignItem {
   audienceId?: number;
   audienceName?: string;
   vkAdGroupId?: string;
+  vkBannerId?: string;
 }
 
 export interface CreateAdCampaignPayload {

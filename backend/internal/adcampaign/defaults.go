@@ -82,3 +82,7 @@ func Normalize(values []string) ([]string, Diagnostics) {
 func HasNamePlaceholder(template string) bool {
 	return strings.Contains(template, "{{name}}")
 }
+
+func RenderNameText(template, value string) string {
+	return strings.ReplaceAll(template, "{{name}}", value)
+}

@@ -83,6 +83,7 @@ type AdCampaignItem struct {
 	AudienceID          int64             `json:"audienceId,omitempty"`
 	AudienceName        string            `json:"audienceName,omitempty"`
 	VKAdGroupID         string            `json:"vkAdGroupId,omitempty"`
+	VKBannerID          string            `json:"vkBannerId,omitempty"`
 	TemplateID          string            `json:"-"`
 	ImageSettings       map[string]string `json:"-"`
 	NameSettingKey      string            `json:"-"`
@@ -261,7 +262,7 @@ func (s *Store) ListAdCampaignItems(ctx context.Context, campaignID, kind, statu
 		return nil, 0, err
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT id,campaign_id,kind,value,status,error,attempts,imanator_order_id,image_url,image_object,
-		openrouter_job_id,source_video_object,video_object,cost_usd,audience_id,audience_name,vk_ad_group_id FROM ad_campaign_items
+		openrouter_job_id,source_video_object,video_object,cost_usd,audience_id,audience_name,vk_ad_group_id,vk_banner_id FROM ad_campaign_items
 		WHERE campaign_id=$1 AND ($2='' OR kind=$2) AND ($3='' OR status=$3) ORDER BY position,id LIMIT $4 OFFSET $5`,
 		campaignID, kind, status, limit, offset)
 	if err != nil {
@@ -271,7 +272,7 @@ func (s *Store) ListAdCampaignItems(ctx context.Context, campaignID, kind, statu
 	var out []*AdCampaignItem
 	for rows.Next() {
 		var i AdCampaignItem
-		if err := rows.Scan(&i.ID, &i.CampaignID, &i.Kind, &i.Value, &i.Status, &i.Error, &i.Attempts, &i.ImanatorOrderID, &i.ImageURL, &i.ImageObject, &i.OpenRouterJobID, &i.SourceVideoObject, &i.VideoObject, &i.CostUSD, &i.AudienceID, &i.AudienceName, &i.VKAdGroupID); err != nil {
+		if err := rows.Scan(&i.ID, &i.CampaignID, &i.Kind, &i.Value, &i.Status, &i.Error, &i.Attempts, &i.ImanatorOrderID, &i.ImageURL, &i.ImageObject, &i.OpenRouterJobID, &i.SourceVideoObject, &i.VideoObject, &i.CostUSD, &i.AudienceID, &i.AudienceName, &i.VKAdGroupID, &i.VKBannerID); err != nil {
 			return nil, 0, err
 		}
 		out = append(out, &i)
@@ -451,12 +452,16 @@ func (s *Store) ClaimCampaignForVKUpload(ctx context.Context, stale time.Duratio
 	defer tx.Rollback() //nolint:errcheck
 	var id string
 	err = tx.QueryRowContext(ctx, `SELECT c.id FROM ad_campaigns c
-		WHERE c.lifecycle IN ('running','uploading')
+		WHERE c.lifecycle IN ('running','uploading','completed')
 		  AND (
 		    c.vk_ad_plan_id=''
 		    OR EXISTS (
 		      SELECT 1 FROM ad_campaign_items i
 		      WHERE i.campaign_id=c.id AND i.status='done' AND i.audience_id<>0 AND i.vk_ad_group_id=''
+		    )
+		    OR EXISTS (
+		      SELECT 1 FROM ad_campaign_items i
+		      WHERE i.campaign_id=c.id AND i.status='done' AND i.vk_ad_group_id<>'' AND i.vk_banner_id=''
 		    )
 		  )
 		  AND NOT EXISTS (
@@ -514,9 +519,16 @@ func (s *Store) SetAdCampaignItemGroupID(ctx context.Context, id, groupID string
 	return err
 }
 
+func (s *Store) SetAdCampaignItemBannerID(ctx context.Context, id, bannerID string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE ad_campaign_items SET vk_banner_id=$2,updated_at=now() WHERE id=$1`, id, bannerID)
+	return err
+}
+
 func (s *Store) ListUploadableAdCampaignItems(ctx context.Context, campaignID string) ([]*AdCampaignItem, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,campaign_id,kind,value,status,audience_id,audience_name,vk_ad_group_id
-		FROM ad_campaign_items WHERE campaign_id=$1 AND status='done' AND audience_id<>0 ORDER BY position,id`, campaignID)
+	rows, err := s.db.QueryContext(ctx, `SELECT i.id,i.campaign_id,i.kind,i.value,i.status,i.audience_id,i.audience_name,
+		i.vk_ad_group_id,i.vk_banner_id,i.video_object,i.source_video_object,c.name_text_template,c.surname_text_template
+		FROM ad_campaign_items i JOIN ad_campaigns c ON c.id=i.campaign_id
+		WHERE i.campaign_id=$1 AND i.status='done' AND i.audience_id<>0 ORDER BY i.position,i.id`, campaignID)
 	if err != nil {
 		return nil, err
 	}
@@ -524,7 +536,7 @@ func (s *Store) ListUploadableAdCampaignItems(ctx context.Context, campaignID st
 	var out []*AdCampaignItem
 	for rows.Next() {
 		var i AdCampaignItem
-		if err := rows.Scan(&i.ID, &i.CampaignID, &i.Kind, &i.Value, &i.Status, &i.AudienceID, &i.AudienceName, &i.VKAdGroupID); err != nil {
+		if err := rows.Scan(&i.ID, &i.CampaignID, &i.Kind, &i.Value, &i.Status, &i.AudienceID, &i.AudienceName, &i.VKAdGroupID, &i.VKBannerID, &i.VideoObject, &i.SourceVideoObject, &i.NameTextTemplate, &i.SurnameTextTemplate); err != nil {
 			return nil, err
 		}
 		out = append(out, &i)

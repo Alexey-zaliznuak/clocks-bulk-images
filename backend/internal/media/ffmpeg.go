@@ -109,6 +109,8 @@ func (f *FFmpeg) TempDir() string { return f.opts.TempDir }
 // Info describes a media file as reported by ffprobe.
 type Info struct {
 	Duration float64
+	Width    int
+	Height   int
 	HasVideo bool
 	HasAudio bool
 }
@@ -120,6 +122,8 @@ type probeOutput struct {
 	Streams []struct {
 		CodecType string `json:"codec_type"`
 		Duration  string `json:"duration"`
+		Width     int    `json:"width"`
+		Height    int    `json:"height"`
 	} `json:"streams"`
 }
 
@@ -152,6 +156,9 @@ func (f *FFmpeg) Probe(ctx context.Context, path string) (*Info, error) {
 		switch s.CodecType {
 		case "video":
 			info.HasVideo = true
+			if info.Width == 0 && s.Width > 0 {
+				info.Width, info.Height = s.Width, s.Height
+			}
 		case "audio":
 			info.HasAudio = true
 		}
