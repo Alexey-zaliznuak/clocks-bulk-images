@@ -21,11 +21,13 @@ export interface UiSettings {
 }
 
 const KEY = "nc_settings";
+const VIDEO_MODEL_DEFAULT_KEY = "nc_video_model_default_v2";
+export const DEFAULT_VIDEO_MODEL = "google/veo-3.1-lite";
 
 export const DEFAULT_SETTINGS: UiSettings = {
   namesText: "",
   templateId: "",
-  videoModel: "",
+  videoModel: DEFAULT_VIDEO_MODEL,
   videoPrompt: "",
   videoDuration: "4",
   videoResolution: "",
@@ -42,8 +44,14 @@ export const DEFAULT_SETTINGS: UiSettings = {
 export function loadSettings(): UiSettings {
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return { ...DEFAULT_SETTINGS };
-    return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+    const settings = raw
+      ? { ...DEFAULT_SETTINGS, ...JSON.parse(raw) }
+      : { ...DEFAULT_SETTINGS };
+    if (localStorage.getItem(VIDEO_MODEL_DEFAULT_KEY) !== DEFAULT_VIDEO_MODEL) {
+      settings.videoModel = DEFAULT_VIDEO_MODEL;
+      localStorage.setItem(VIDEO_MODEL_DEFAULT_KEY, DEFAULT_VIDEO_MODEL);
+    }
+    return settings;
   } catch {
     return { ...DEFAULT_SETTINGS };
   }

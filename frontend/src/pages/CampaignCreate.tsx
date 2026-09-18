@@ -9,6 +9,7 @@ import {
 } from "../campaignValidation";
 import ConfirmDialog from "../components/ConfirmDialog";
 import { formatDuration } from "../format";
+import { DEFAULT_VIDEO_MODEL } from "../settings";
 
 type Tab = "names" | "surnames";
 
@@ -26,11 +27,12 @@ interface CampaignFormSettings {
 }
 
 const STORAGE_KEY = "nc_campaign_settings";
+const VIDEO_MODEL_DEFAULT_KEY = "nc_campaign_video_model_default_v2";
 const initialSettings: CampaignFormSettings = {
   templateId: "",
   nameSettingKey: "name",
   imageSettingsText: "{}",
-  videoModel: "",
+  videoModel: DEFAULT_VIDEO_MODEL,
   videoPrompt: "",
   videoDuration: "4",
   videoResolution: "",
@@ -41,10 +43,15 @@ const initialSettings: CampaignFormSettings = {
 
 function loadCampaignSettings(): CampaignFormSettings {
   try {
-    return {
+    const settings = {
       ...initialSettings,
       ...JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}"),
     } as CampaignFormSettings;
+    if (localStorage.getItem(VIDEO_MODEL_DEFAULT_KEY) !== DEFAULT_VIDEO_MODEL) {
+      settings.videoModel = DEFAULT_VIDEO_MODEL;
+      localStorage.setItem(VIDEO_MODEL_DEFAULT_KEY, DEFAULT_VIDEO_MODEL);
+    }
+    return settings;
   } catch {
     return { ...initialSettings };
   }
