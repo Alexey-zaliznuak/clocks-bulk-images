@@ -85,7 +85,7 @@ func ParsePadsTrees(data []byte) []PadNode {
 func convertRoots(items []rawPadNode) []PadNode {
 	out := make([]PadNode, 0, len(items))
 	for _, item := range items {
-		node := convertNode(item)
+		node := convertNode(item, false)
 		if node.Name == "" && len(item.Tree) > 0 {
 			node.Name = firstNonEmpty(item.Description, "Площадки")
 		}
@@ -105,13 +105,13 @@ func parseEmbeddedTree(raw json.RawMessage) []PadNode {
 	}
 	var list []rawPadNode
 	if err := json.Unmarshal(raw, &list); err == nil && len(list) > 0 {
-		return convertRoots(list)
+		return convertTreeNodes(list)
 	}
 	var one rawPadNode
 	if err := json.Unmarshal(raw, &one); err != nil {
 		return nil
 	}
-	node := convertNode(one)
+	node := convertNode(one, true)
 	if (node.ID == "root" || node.Name == "") && len(node.Children) > 0 && len(node.Pads) == 0 {
 		return node.Children
 	}
@@ -121,7 +121,18 @@ func parseEmbeddedTree(raw json.RawMessage) []PadNode {
 	return nil
 }
 
-func convertNode(raw rawPadNode) PadNode {
+func convertTreeNodes(items []rawPadNode) []PadNode {
+	out := make([]PadNode, 0, len(items))
+	for _, item := range items {
+		converted := convertNode(item, true)
+		if converted.Name != "" || len(converted.Children) > 0 || len(converted.Pads) > 0 {
+			out = append(out, converted)
+		}
+	}
+	return out
+}
+
+func convertNode(raw rawPadNode, leafIDsArePads bool) PadNode {
 	pads := append([]int(nil), raw.Params.Pads...)
 	pads = append(pads, raw.Pads...)
 	if raw.PadID > 0 {
@@ -133,9 +144,16 @@ func convertNode(raw rawPadNode) PadNode {
 	}
 	children := make([]PadNode, 0, len(rawChildren))
 	for _, child := range rawChildren {
-		converted := convertNode(child)
+		converted := convertNode(child, leafIDsArePads)
 		if converted.Name != "" || len(converted.Children) > 0 || len(converted.Pads) > 0 {
 			children = append(children, converted)
+		}
+	}
+	// Official PadsTree: a leaf's id is the pad id. The PadsTree resource id is
+	// the tree id and must not be sent as targetings.pads.
+	if leafIDsArePads && len(children) == 0 && len(pads) == 0 {
+		if id := numericID(raw.ID); id > 0 {
+			pads = []int{id}
 		}
 	}
 	return PadNode{
@@ -143,6 +161,132 @@ func convertNode(raw rawPadNode) PadNode {
 		Name:     firstNonEmpty(raw.Name, raw.Description),
 		Pads:     uniqueInts(pads),
 		Children: children,
+	}
+}
+
+// ResolvePads keeps only ids from the package PadsTree. Package.pads_tree_id
+// is the tree that targetings.pads must belong to; other trees and the mixed
+// packages_pads list are rejected as "not permitted in this pad tree".
+func ResolvePads(selected []int, pkg Package, trees []PadNode) []int {
+	allowed := CollectPadIDs(padsTreeForPackage(pkg, trees))
+	if len(allowed) == 0 {
+		return nil
+	}
+	allowedSet := intSet(allowed)
+	want := selected
+	if len(want) == 0 {
+		want = PickVKFeedPadIDs(padsTreeForPackage(pkg, trees))
+	}
+	out := intersectPadIDs(want, allowedSet)
+	if len(out) == 0 {
+		out = intersectPadIDs(PickVKFeedPadIDs(padsTreeForPackage(pkg, trees)), allowedSet)
+	}
+	return out
+}
+
+func padsTreeForPackage(pkg Package, trees []PadNode) []PadNode {
+	if pkg.PadsTreeID <= 0 {
+		return nil
+	}
+	id := strconv.FormatInt(pkg.PadsTreeID, 10)
+	for _, tree := range trees {
+		if tree.ID == id {
+			return []PadNode{tree}
+		}
+	}
+	return nil
+}
+
+func PickVKFeedPadIDs(nodes []PadNode) []int {
+	var vk, feed []int
+	var walk func(PadNode, string)
+	walk = func(n PadNode, parent string) {
+		blob := parent + " " + n.Name + " " + n.ID
+		if len(n.Pads) > 0 {
+			if containsFold(blob, "лента", "feed") && containsFold(blob, "vk", "вк", "вконтакте", "vkontakte") {
+				vk = append(vk, n.Pads...)
+			} else if containsFold(blob, "лента", "feed") {
+				feed = append(feed, n.Pads...)
+			}
+		}
+		for _, child := range n.Children {
+			walk(child, blob)
+		}
+	}
+	for _, node := range nodes {
+		walk(node, "")
+	}
+	if len(vk) > 0 {
+		return uniqueInts(vk)
+	}
+	return uniqueInts(feed)
+}
+
+func padIDs(pads []Pad) []int {
+	out := make([]int, 0, len(pads))
+	for _, pad := range pads {
+		if pad.ID > 0 {
+			out = append(out, pad.ID)
+		}
+	}
+	return out
+}
+
+func orPadIDs(selected, fallback []int) []int {
+	if len(selected) > 0 {
+		return selected
+	}
+	return fallback
+}
+
+func intSet(ids []int) map[int]struct{} {
+	out := make(map[int]struct{}, len(ids))
+	for _, id := range ids {
+		if id > 0 {
+			out[id] = struct{}{}
+		}
+	}
+	return out
+}
+
+func intersectPadIDs(want []int, allowed map[int]struct{}) []int {
+	out := make([]int, 0, len(want))
+	seen := map[int]struct{}{}
+	for _, id := range want {
+		if _, ok := allowed[id]; !ok {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+func numericID(value any) int {
+	switch v := value.(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case json.Number:
+		n, err := v.Int64()
+		if err != nil || n <= 0 {
+			return 0
+		}
+		return int(n)
+	case string:
+		n, err := strconv.Atoi(strings.TrimSpace(v))
+		if err != nil || n <= 0 {
+			return 0
+		}
+		return n
+	default:
+		return 0
 	}
 }
 

@@ -168,6 +168,7 @@ type Package struct {
 	Objective   textList   `json:"objective"`
 	PricedGoal  *PriceGoal `json:"priced_goal"`
 	Description string     `json:"description"`
+	PadsTreeID  int64      `json:"pads_tree_id"`
 }
 
 // textList accepts either "community" or ["community","socialengagement"].

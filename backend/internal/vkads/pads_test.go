@@ -41,6 +41,61 @@ func TestParsePadsTreesCabinetShape(t *testing.T) {
 	}
 }
 
+func TestParsePadsTreesOfficialLeafIDs(t *testing.T) {
+	raw := []byte(`{
+		"items": [{
+			"id": 5,
+			"tree": {"children": [{"id": 3417}, {"children": [{"id": 3420}]}]}
+		}]
+	}`)
+	got := ParsePadsTrees(raw)
+	ids := CollectPadIDs(got)
+	if len(ids) != 2 || ids[0] != 3417 || ids[1] != 3420 {
+		t.Fatalf("official leaf ids = %v trees=%#v", ids, got)
+	}
+	if len(got) != 1 || got[0].ID != "5" {
+		t.Fatalf("tree id = %#v", got)
+	}
+}
+
+func TestResolvePadsUsesPackageTreeOnly(t *testing.T) {
+	trees := []PadNode{
+		{
+			ID:   "27",
+			Name: "Соцсети",
+			Children: []PadNode{
+				{ID: "vk", Name: "ВКонтакте", Children: []PadNode{
+					{Name: "Лента", Pads: []int{3417, 3420}},
+					{Name: "Клипы", Pads: []int{9991}},
+				}},
+			},
+		},
+		{ID: "9", Name: "Другое дерево", Children: []PadNode{
+			{Name: "Лента", Pads: []int{100}},
+		}},
+	}
+	pkg := Package{ID: 3, PadsTreeID: 27}
+
+	got := ResolvePads(nil, pkg, trees)
+	if len(got) != 2 || got[0] != 3417 || got[1] != 3420 {
+		t.Fatalf("default feed = %v", got)
+	}
+
+	got = ResolvePads([]int{100, 9991, 3417}, pkg, trees)
+	if len(got) != 2 || got[0] != 9991 || got[1] != 3417 {
+		t.Fatalf("filtered selection = %v", got)
+	}
+
+	got = ResolvePads([]int{100}, pkg, trees)
+	if len(got) != 2 || got[0] != 3417 {
+		t.Fatalf("foreign pads fall back to feed = %v", got)
+	}
+
+	if got := ResolvePads([]int{3417}, Package{PadsTreeID: 8}, trees); len(got) != 0 {
+		t.Fatalf("unknown tree must not leak pads: %v", got)
+	}
+}
+
 func TestGroupPackagePads(t *testing.T) {
 	got := GroupPackagePads([]Pad{
 		{ID: 1, Name: "vk_feed", Description: "Лента ВКонтакте"},

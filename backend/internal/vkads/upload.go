@@ -32,13 +32,17 @@ func (s *Service) ResolveCatalog(ctx context.Context, settings Settings, created
 		return nil, err
 	}
 	russia := PickRussiaRegion(regions)
-	pads := settings.Pads
-	if len(pads) == 0 {
+	trees, err := s.ListPlacementTree(ctx)
+	if err != nil {
+		return nil, err
+	}
+	pads := ResolvePads(settings.Pads, *pkg, trees)
+	if len(pads) == 0 && pkg.PadsTreeID == 0 {
 		listed, err := s.ListPackagePads(ctx, pkg.ID)
 		if err != nil {
 			return nil, err
 		}
-		pads = PickVKFeedPads(listed)
+		pads = intersectPadIDs(orPadIDs(settings.Pads, PickVKFeedPads(listed)), intSet(padIDs(listed)))
 	}
 	communityURL := fmt.Sprintf("https://vk.com/club%d", settings.CommunityID)
 	if tags := strings.TrimSpace(settings.RefTags); tags != "" {
