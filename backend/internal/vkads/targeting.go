@@ -76,14 +76,9 @@ func groupTargetings(settings Settings, audienceID, russiaRegion int64, pads []i
 	return target
 }
 
-// autobiddingMode maps the form to AdPlan/AdGroup. Both objects document only
-// max_goals: no bid, daily or total budget required. That is the cabinet's
-// «Минимальная цена», not second_price from old AdGroups examples.
-func autobiddingMode(strategy string) string {
-	switch strategy {
-	case "second_price_mean":
-		return "second_price_mean"
-	default:
-		return "max_goals"
-	}
+// autobiddingMode maps the form to AdPlan/AdGroup. Both objects document a
+// single choice, max_goals: no bid, daily or total budget required. That is the
+// cabinet's «Минимальная цена», not second_price from old AdGroups examples.
+func autobiddingMode(string) string {
+	return "max_goals"
 }

@@ -27,14 +27,6 @@ func TestParsePackagePatternIDsFromObjects(t *testing.T) {
 	}
 }
 
-func TestPackageAllowedPatternIDsUsesFormat(t *testing.T) {
-	pkg := Package{Format: []byte(`[486,422,525]`)}
-	got := PackageAllowedPatternIDs(pkg)
-	if len(got) != 3 || got[0] != 486 {
-		t.Fatalf("got %v", got)
-	}
-}
-
 func TestParsePackagePatternIDsFromIDMap(t *testing.T) {
 	got := ParsePackagePatternIDs([]byte(`{"settings":{"patterns":{"values":{"486":{},"422":{},"525":{}}}}}`))
 	want := map[int64]bool{486: true, 422: true, 525: true}

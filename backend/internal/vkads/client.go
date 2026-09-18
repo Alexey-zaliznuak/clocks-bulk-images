@@ -168,11 +168,9 @@ type Package struct {
 	Objective   textList        `json:"objective"`
 	PricedGoal  *PriceGoal      `json:"priced_goal"`
 	Description string          `json:"description"`
-	PadsTreeID     int64           `json:"pads_tree_id"`
-	BannerFormatID int64           `json:"banner_format_id"`
-	Options        json.RawMessage `json:"options"`
-	Format         json.RawMessage `json:"format"`
-	PatternIDs     []int64         `json:"-"`
+	PadsTreeID int64           `json:"pads_tree_id"`
+	Options    json.RawMessage `json:"options"`
+	PatternIDs []int64         `json:"-"`
 }
 
 // textList accepts either "community" or ["community","socialengagement"].
@@ -248,7 +246,7 @@ func (s *Service) ListPackages(ctx context.Context) ([]Package, error) {
 	seen := map[int64]struct{}{}
 	for pages, offset := 0, 0; ; pages++ {
 		env, err := s.getListQuery(ctx, "/api/v2/packages.json", offset, listPageSize, url.Values{
-			"fields": {"id,name,objective,description,pads_tree_id,options,banner_format_id,format,priced_event_type"},
+			"fields": {"id,name,objective,description,pads_tree_id,options,priced_event_type,status"},
 		})
 		if err != nil {
 			if len(all) > 0 {
@@ -443,9 +441,9 @@ func (n createdNested) asCreated() CreatedGroup {
 }
 
 func (s *Service) CreateAdGroup(ctx context.Context, body map[string]any) (CreatedGroup, error) {
-	data, err := s.Post(ctx, "/api/v2/campaigns.json", body)
+	data, err := s.Post(ctx, "/api/v2/ad_groups.json", body)
 	if err != nil {
-		data, err = s.Post(ctx, "/api/v2/ad_groups.json", body)
+		data, err = s.Post(ctx, "/api/v2/campaigns.json", body)
 	}
 	if err != nil {
 		return CreatedGroup{}, err

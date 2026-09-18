@@ -45,6 +45,11 @@ func (s *Service) ResolveCatalog(ctx context.Context, settings Settings, created
 		}
 		pads = intersectPadIDs(orPadIDs(settings.Pads, PickVKFeedPads(listed)), intSet(padIDs(listed)))
 	}
+	if allowed := ParsePackageDefaultPads(pkg.Options); len(allowed) > 0 {
+		if narrowed := intersectPadIDs(orPadIDs(pads, allowed), intSet(allowed)); len(narrowed) > 0 {
+			pads = narrowed
+		}
+	}
 	communityURL := fmt.Sprintf("https://vk.com/club%d", settings.CommunityID)
 	if tags := strings.TrimSpace(settings.RefTags); tags != "" {
 		communityURL += "?" + strings.TrimPrefix(tags, "?")
@@ -89,12 +94,15 @@ func PlanBody(name string, settings Settings, cat *Catalog) map[string]any {
 	return body
 }
 
+// AttachCampaigns nests groups into an ad_plan create call. The AdPlans
+// resource documents the key as ad_groups; some cabinets answer to campaigns,
+// which CreateAdPlan retries with.
 func AttachCampaigns(plan map[string]any, groups []map[string]any) map[string]any {
 	list := make([]any, 0, len(groups))
 	for _, group := range groups {
 		list = append(list, group)
 	}
-	plan["campaigns"] = list
+	plan["ad_groups"] = list
 	return plan
 }
 

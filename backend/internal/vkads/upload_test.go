@@ -52,9 +52,9 @@ func TestPlanBodyBudgetStringWhenOptimized(t *testing.T) {
 		t.Fatal("optimized group must inherit autobidding_mode from the plan")
 	}
 	AttachCampaigns(body, []map[string]any{group})
-	list, _ := body["campaigns"].([]any)
+	list, _ := body["ad_groups"].([]any)
 	if len(list) != 1 {
-		t.Fatalf("campaigns = %#v", body["campaigns"])
+		t.Fatalf("ad_groups = %#v", body["ad_groups"])
 	}
 }
 

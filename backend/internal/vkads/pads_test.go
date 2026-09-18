@@ -96,6 +96,20 @@ func TestResolvePadsUsesPackageTreeOnly(t *testing.T) {
 	}
 }
 
+func TestParsePackageDefaultPads(t *testing.T) {
+	got := ParsePackageDefaultPads([]byte(`{"targetings":[{"name":"geo"},{"name":"pads","default":[102641,1265106],"values":[102641,1265106,111756]}]}`))
+	if len(got) != 2 || got[0] != 102641 || got[1] != 1265106 {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestParsePackageDefaultPadsFallsBackToValues(t *testing.T) {
+	got := ParsePackageDefaultPads([]byte(`{"targetings":[{"name":"pads","values":[111756]}]}`))
+	if len(got) != 1 || got[0] != 111756 {
+		t.Fatalf("got %v", got)
+	}
+}
+
 func TestGroupPackagePads(t *testing.T) {
 	got := GroupPackagePads([]Pad{
 		{ID: 1, Name: "vk_feed", Description: "Лента ВКонтакте"},

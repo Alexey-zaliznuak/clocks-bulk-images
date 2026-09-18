@@ -188,8 +188,6 @@ func ParsePackagePatternIDs(raw json.RawMessage) []int64 {
 func PackageAllowedPatternIDs(pkg Package) []int64 {
 	ids := append([]int64{}, pkg.PatternIDs...)
 	ids = append(ids, ParsePackagePatternIDs(pkg.Options)...)
-	ids = append(ids, ParsePackagePatternIDs(pkg.Format)...)
-	ids = append(ids, numericMapKeysRaw(pkg.Format)...)
 	return uniqueInt64s(ids)
 }
 
@@ -257,26 +255,6 @@ func numericMapKeys(m map[string]any) []int64 {
 		if id := positiveInt64(k); id > 0 {
 			ids = append(ids, id)
 		}
-	}
-	return ids
-}
-
-func numericMapKeysRaw(raw json.RawMessage) []int64 {
-	if len(bytes.TrimSpace(raw)) == 0 {
-		return nil
-	}
-	var obj map[string]json.RawMessage
-	if json.Unmarshal(raw, &obj) != nil || len(obj) == 0 {
-		return nil
-	}
-	var ids []int64
-	for k := range obj {
-		if id := positiveInt64(k); id > 0 {
-			ids = append(ids, id)
-		}
-	}
-	if len(ids) == 0 || len(ids) < (len(obj)+1)/2 {
-		return nil
 	}
 	return ids
 }
@@ -413,7 +391,7 @@ func (s *Service) ListPackagePatterns(ctx context.Context, pkg Package, pads []i
 	if fetchedPath == "" {
 		fetchedPath = packageFetchPath(pkg.ID)
 	}
-	logVKExchange("GET", fetchedPath, "<empty>", 200, string(orBytes(fetchedBody, pkg.Options, pkg.Format)), fmt.Errorf("пакет %d без паттернов", pkg.ID))
+	logVKExchange("GET", fetchedPath, "<empty>", 200, string(orBytes(fetchedBody, pkg.Options)), fmt.Errorf("пакет %d без паттернов", pkg.ID))
 	log.Printf("vkads package %d dump pads=%v pads_tree_id=%d parsed_ids=%v\noptions: %s",
 		pkg.ID, pads, pkg.PadsTreeID, ids, orJSON(pkg.Options))
 	return nil, fmt.Errorf("vkads: пакет %d не задаёт паттерны объявлений", pkg.ID)
@@ -436,7 +414,7 @@ func orJSON(raw json.RawMessage) string {
 }
 
 func packageFetchPath(id int64) string {
-	return fmt.Sprintf("/api/v2/packages.json?fields=id,name,options,format,banner_format_id,pads_tree_id&_id=%d&limit=1", id)
+	return fmt.Sprintf("/api/v2/packages.json?fields=id,name,options,pads_tree_id&_id=%d&limit=1", id)
 }
 
 func (s *Service) fetchPackage(ctx context.Context, id int64) (Package, string, []byte, error) {

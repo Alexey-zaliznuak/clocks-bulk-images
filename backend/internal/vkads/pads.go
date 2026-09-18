@@ -184,6 +184,34 @@ func ResolvePads(selected []int, pkg Package, trees []PadNode) []int {
 	return out
 }
 
+// ParsePackageDefaultPads reads options.targetings[pads] — the placements the
+// cabinet offers for this package, with "default" preselected.
+func ParsePackageDefaultPads(raw json.RawMessage) []int {
+	if len(raw) == 0 {
+		return nil
+	}
+	var opts struct {
+		Targetings []struct {
+			Name    string `json:"name"`
+			Default []int  `json:"default"`
+			Values  []int  `json:"values"`
+		} `json:"targetings"`
+	}
+	if err := json.Unmarshal(raw, &opts); err != nil {
+		return nil
+	}
+	for _, t := range opts.Targetings {
+		if t.Name != "pads" {
+			continue
+		}
+		if len(t.Default) > 0 {
+			return uniqueInts(t.Default)
+		}
+		return uniqueInts(t.Values)
+	}
+	return nil
+}
+
 func padsTreeForPackage(pkg Package, trees []PadNode) []PadNode {
 	if pkg.PadsTreeID <= 0 {
 		return nil

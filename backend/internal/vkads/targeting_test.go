@@ -42,7 +42,8 @@ func TestAutobiddingMode(t *testing.T) {
 	if got := autobiddingMode("max_goals"); got != "max_goals" {
 		t.Fatalf("max_goals = %q", got)
 	}
-	if got := autobiddingMode("second_price_mean"); got != "second_price_mean" {
+	// AdPlan and AdGroup document max_goals as the only allowed choice.
+	if got := autobiddingMode("second_price_mean"); got != "max_goals" {
 		t.Fatalf("second_price_mean = %q", got)
 	}
 }
