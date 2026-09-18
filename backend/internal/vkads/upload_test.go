@@ -94,8 +94,28 @@ func TestGroupBodyBudgetWhenNotOptimized(t *testing.T) {
 }
 
 func TestParseCreatePlanReadsNestedCampaigns(t *testing.T) {
-	planID, groups, err := parseCreatePlan([]byte(`{"id":340,"campaigns":[{"id":321},{"id":322}]}`))
-	if err != nil || planID != 340 || len(groups) != 2 || groups[0] != 321 || groups[1] != 322 {
+	planID, groups, err := parseCreatePlan([]byte(`{"id":340,"campaigns":[{"id":321,"banners":[{"id":11}]},{"id":322}]}`))
+	if err != nil || planID != 340 || len(groups) != 2 || groups[0].ID != 321 || groups[0].BannerIDs[0] != 11 || groups[1].ID != 322 {
 		t.Fatalf("plan=%d groups=%v err=%v", planID, groups, err)
+	}
+}
+
+func TestParseCreateGroupReadsBanners(t *testing.T) {
+	got, err := parseCreateGroup([]byte(`{"id":9826424,"banners":[{"id":23826937}]}`))
+	if err != nil || got.ID != 9826424 || len(got.BannerIDs) != 1 || got.BannerIDs[0] != 23826937 {
+		t.Fatalf("got=%#v err=%v", got, err)
+	}
+}
+
+func TestAttachBanner(t *testing.T) {
+	group := NestedGroupBody("Аркадий", 77, testSettings(true, 999), testCatalog())
+	banner := BannerBody("Аркадий", 0, 9, 55, "title", "text", "contactUs", "video_vertical", nil)
+	AttachBanner(group, banner)
+	if _, ok := banner["ad_group_id"]; ok {
+		t.Fatal("nested banner must not have ad_group_id")
+	}
+	list, _ := group["banners"].([]any)
+	if len(list) != 1 {
+		t.Fatalf("banners = %#v", group["banners"])
 	}
 }

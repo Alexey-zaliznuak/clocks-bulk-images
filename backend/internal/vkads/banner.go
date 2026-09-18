@@ -110,25 +110,19 @@ func (s *Service) UploadVideo(ctx context.Context, filename string, r io.Reader,
 	return out.ID, nil
 }
 
-func (s *Service) CreateBanner(ctx context.Context, body map[string]any) (int64, error) {
-	data, err := s.Post(ctx, "/api/v2/banners.json", body)
-	if err != nil {
-		return 0, err
-	}
-	var out struct {
-		ID int64 `json:"id"`
-	}
-	if err := json.Unmarshal(data, &out); err != nil || out.ID == 0 {
-		return 0, fmt.Errorf("vkads banner: unexpected %s", truncate(data, 300))
-	}
-	return out.ID, nil
+func AttachBanner(group, banner map[string]any) map[string]any {
+	delete(banner, "ad_group_id")
+	group["banners"] = []any{banner}
+	return group
 }
 
 func BannerBody(name string, groupID, urlID, contentID int64, title, text, cta, videoRole string, pattern *BannerPattern) map[string]any {
 	body := map[string]any{
-		"name":        name,
-		"status":      "active",
-		"ad_group_id": groupID,
+		"name":   name,
+		"status": "active",
+	}
+	if groupID > 0 {
+		body["ad_group_id"] = groupID
 	}
 	urls := map[string]any{}
 	content := map[string]any{}

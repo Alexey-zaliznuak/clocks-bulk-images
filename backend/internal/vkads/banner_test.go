@@ -4,8 +4,11 @@ import "testing"
 
 func TestBannerBodyCommunityFallback(t *testing.T) {
 	body := BannerBody("Аркадий", 10, 9, 55, "RuTime | именные наручные часы", "Аркадий - имя", "contactUs", "video_vertical", nil)
-	if body["name"] != "Аркадий" || body["ad_group_id"] != int64(10) {
+	if body["name"] != "Аркадий" {
 		t.Fatalf("header = %#v", body)
+	}
+	if body["ad_group_id"] != int64(10) {
+		t.Fatalf("ad_group_id = %#v", body["ad_group_id"])
 	}
 	content, _ := body["content"].(map[string]any)
 	if _, ok := content["video_vertical"].(map[string]any); !ok {

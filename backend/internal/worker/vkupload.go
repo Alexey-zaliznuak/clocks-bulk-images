@@ -46,22 +46,39 @@ func (w *Worker) doVKUpload(ctx context.Context, campaign *store.AdCampaign) err
 	if err != nil {
 		return err
 	}
-	var pendingGroups []*store.AdCampaignItem
-	for _, item := range items {
-		if item.VKAdGroupID == "" {
-			pendingGroups = append(pendingGroups, item)
-		}
+	patterns, err := w.vkads.ListBannerPatterns(ctx)
+	if err != nil {
+		log.Printf("worker: vk upload %s: banner_patterns: %v", campaign.ID, err)
 	}
+
+	banners := make([]map[string]any, len(items))
+	for i, item := range items {
+		if item.VKBannerID != "" {
+			continue
+		}
+		_ = w.store.TouchAdCampaign(ctx, campaign.ID)
+		log.Printf("worker: vk upload %s: upload video %s", campaign.ID, item.Value)
+		banner, err := w.prepareBanner(ctx, item, settings, cat, patterns)
+		if err != nil {
+			return fmt.Errorf("видео %q: %w", item.Value, err)
+		}
+		banners[i] = banner
+	}
+
 	if campaign.VKAdPlanID == "" {
-		if len(pendingGroups) == 0 {
+		if len(items) == 0 {
 			return fmt.Errorf("нет групп для создания кампании ВКР")
 		}
-		groups := make([]map[string]any, 0, len(pendingGroups))
-		for _, item := range pendingGroups {
-			groups = append(groups, vkads.NestedGroupBody(item.Value, item.AudienceID, settings, cat))
+		groups := make([]map[string]any, 0, len(items))
+		for i, item := range items {
+			group := vkads.NestedGroupBody(item.Value, item.AudienceID, settings, cat)
+			if banners[i] != nil {
+				vkads.AttachBanner(group, banners[i])
+			}
+			groups = append(groups, group)
 		}
 		log.Printf("worker: vk upload %s: create ad_plan with %d groups", campaign.ID, len(groups))
-		planID, groupIDs, err := w.vkads.CreateAdPlan(ctx, vkads.AttachCampaigns(vkads.PlanBody(campaign.Title, settings, cat), groups))
+		planID, created, err := w.vkads.CreateAdPlan(ctx, vkads.AttachCampaigns(vkads.PlanBody(campaign.Title, settings, cat), groups))
 		if err != nil {
 			return fmt.Errorf("создать кампанию ВКР: %w", err)
 		}
@@ -69,135 +86,148 @@ func (w *Worker) doVKUpload(ctx context.Context, campaign *store.AdCampaign) err
 		if err := w.store.SaveAdCampaignVK(ctx, campaign); err != nil {
 			return err
 		}
-		for i, id := range groupIDs {
-			if i >= len(pendingGroups) {
-				break
-			}
-			if err := w.store.SetAdCampaignItemGroupID(ctx, pendingGroups[i].ID, vkads.FormatID(id)); err != nil {
-				return err
-			}
-			pendingGroups[i].VKAdGroupID = vkads.FormatID(id)
+		if err := w.saveCreatedGroups(ctx, items, created); err != nil {
+			return err
 		}
-		log.Printf("worker: vk upload %s: ad_plan %s, groups %d", campaign.ID, campaign.VKAdPlanID, len(groupIDs))
+		log.Printf("worker: vk upload %s: ad_plan %s, groups %d", campaign.ID, campaign.VKAdPlanID, len(created))
 	}
+
 	planID, err := strconv.ParseInt(campaign.VKAdPlanID, 10, 64)
 	if err != nil {
 		return fmt.Errorf("id кампании ВКР: %w", err)
 	}
 	var last error
-	for _, item := range pendingGroups {
+	createdBanners := 0
+	for i, item := range items {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		_ = w.store.TouchAdCampaign(ctx, campaign.ID)
-		if item.VKAdGroupID != "" {
+		if item.VKBannerID != "" {
 			continue
 		}
-		id, err := w.vkads.CreateAdGroup(ctx, vkads.GroupBody(item.Value, planID, item.AudienceID, settings, cat))
+		_ = w.store.TouchAdCampaign(ctx, campaign.ID)
+		if banners[i] == nil {
+			continue
+		}
+		oldGroup, _ := strconv.ParseInt(item.VKAdGroupID, 10, 64)
+		group := vkads.GroupBody(item.Value, planID, item.AudienceID, settings, cat)
+		vkads.AttachBanner(group, banners[i])
+		log.Printf("worker: vk upload %s: create group+banner %s", campaign.ID, item.Value)
+		got, err := w.vkads.CreateAdGroup(ctx, group)
 		if err != nil {
-			last = fmt.Errorf("группа %q: %w", item.Value, err)
+			last = fmt.Errorf("группа/объявление %q: %w", item.Value, err)
 			log.Printf("worker: vk group %s/%s: %v", campaign.ID, item.Value, err)
 			continue
 		}
-		if err := w.store.SetAdCampaignItemGroupID(ctx, item.ID, vkads.FormatID(id)); err != nil {
+		if err := w.persistCreated(ctx, item, got); err != nil {
 			last = err
-		} else {
-			item.VKAdGroupID = vkads.FormatID(id)
-			log.Printf("worker: vk upload %s: group %s = %d", campaign.ID, item.Value, id)
+			continue
 		}
+		if oldGroup > 0 && oldGroup != got.ID {
+			if delErr := w.vkads.DeleteAdGroup(ctx, oldGroup); delErr != nil {
+				log.Printf("worker: vk upload %s: delete empty group %d: %v", campaign.ID, oldGroup, delErr)
+			}
+		}
+		createdBanners += len(got.BannerIDs)
+		log.Printf("worker: vk upload %s: group %s = %d banner=%v", campaign.ID, item.Value, got.ID, got.BannerIDs)
 	}
 	if last != nil {
 		return last
 	}
-
-	patterns, err := w.vkads.ListBannerPatterns(ctx)
-	if err != nil {
-		log.Printf("worker: vk upload %s: banner_patterns: %v", campaign.ID, err)
-	}
-	created := 0
-	for _, item := range items {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if item.VKAdGroupID == "" || item.VKBannerID != "" {
-			continue
-		}
-		_ = w.store.TouchAdCampaign(ctx, campaign.ID)
-		log.Printf("worker: vk upload %s: banner %s", campaign.ID, item.Value)
-		id, err := w.createItemBanner(ctx, item, settings, cat, patterns)
-		if err != nil {
-			last = fmt.Errorf("объявление %q: %w", item.Value, err)
-			log.Printf("worker: vk banner %s/%s: %v", campaign.ID, item.Value, err)
-			continue
-		}
-		if err := w.store.SetAdCampaignItemBannerID(ctx, item.ID, vkads.FormatID(id)); err != nil {
-			last = err
-			continue
-		}
-		item.VKBannerID = vkads.FormatID(id)
-		created++
-		log.Printf("worker: vk upload %s: banner %s = %d", campaign.ID, item.Value, id)
-	}
-	if last != nil {
-		return last
-	}
-	log.Printf("worker: vk upload %s: done plan=%s banners=%d", campaign.ID, campaign.VKAdPlanID, created)
+	log.Printf("worker: vk upload %s: done plan=%s banners=%d", campaign.ID, campaign.VKAdPlanID, createdBanners)
 	return nil
 }
 
-func (w *Worker) createItemBanner(ctx context.Context, item *store.AdCampaignItem, settings vkads.Settings, cat *vkads.Catalog, patterns []vkads.BannerPattern) (int64, error) {
-	groupID, err := strconv.ParseInt(item.VKAdGroupID, 10, 64)
-	if err != nil || groupID == 0 {
-		return 0, fmt.Errorf("id группы ВКР")
+func (w *Worker) saveCreatedGroups(ctx context.Context, items []*store.AdCampaignItem, created []vkads.CreatedGroup) error {
+	for i, got := range created {
+		if i >= len(items) {
+			break
+		}
+		if err := w.persistCreated(ctx, items[i], got); err != nil {
+			return err
+		}
 	}
+	return nil
+}
+
+func (w *Worker) persistCreated(ctx context.Context, item *store.AdCampaignItem, got vkads.CreatedGroup) error {
+	if got.ID != 0 {
+		if err := w.store.SetAdCampaignItemGroupID(ctx, item.ID, vkads.FormatID(got.ID)); err != nil {
+			return err
+		}
+		item.VKAdGroupID = vkads.FormatID(got.ID)
+	}
+	bannerID := firstID(got.BannerIDs)
+	if bannerID == 0 && got.ID != 0 {
+		ids, err := w.vkads.ListGroupBannerIDs(ctx, got.ID)
+		if err != nil {
+			log.Printf("worker: vk banners for group %d: %v", got.ID, err)
+		}
+		bannerID = firstID(ids)
+	}
+	if bannerID != 0 {
+		if err := w.store.SetAdCampaignItemBannerID(ctx, item.ID, vkads.FormatID(bannerID)); err != nil {
+			return err
+		}
+		item.VKBannerID = vkads.FormatID(bannerID)
+	}
+	return nil
+}
+
+func firstID(ids []int64) int64 {
+	if len(ids) == 0 {
+		return 0
+	}
+	return ids[0]
+}
+
+func (w *Worker) prepareBanner(ctx context.Context, item *store.AdCampaignItem, settings vkads.Settings, cat *vkads.Catalog, patterns []vkads.BannerPattern) (map[string]any, error) {
 	video := item.VideoObject
 	if video == "" {
 		video = item.SourceVideoObject
 	}
 	if video == "" {
-		return 0, fmt.Errorf("нет видео")
+		return nil, fmt.Errorf("нет видео")
 	}
 	if w.ffmpeg == nil || w.storage == nil {
-		return 0, fmt.Errorf("нет ffmpeg/storage для загрузки объявления")
+		return nil, fmt.Errorf("нет ffmpeg/storage для загрузки объявления")
 	}
 	dir, err := os.MkdirTemp(w.ffmpeg.TempDir(), "vk-banner-*")
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	defer os.RemoveAll(dir)
 	local := filepath.Join(dir, "ad.mp4")
 	if err := w.fetchToFile(ctx, video, local); err != nil {
-		return 0, fmt.Errorf("скачать видео: %w", err)
+		return nil, fmt.Errorf("скачать видео: %w", err)
 	}
 	info, err := w.ffmpeg.Probe(ctx, local)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	f, err := os.Open(local)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	defer f.Close()
 	contentID, err := w.vkads.UploadVideo(ctx, item.Value+".mp4", f, info.Width, info.Height)
 	if err != nil {
-		return 0, fmt.Errorf("загрузить видео: %w", err)
+		return nil, fmt.Errorf("загрузить видео: %w", err)
 	}
-	role := vkads.VideoRole(info.Width, info.Height)
-	pattern := vkads.PickVideoBannerPattern(patterns, role)
 	text := item.NameTextTemplate
 	if item.Kind == "surname" {
 		text = item.SurnameTextTemplate
 	}
-	body := vkads.BannerBody(
+	role := vkads.VideoRole(info.Width, info.Height)
+	return vkads.BannerBody(
 		item.Value,
-		groupID,
+		0,
 		cat.URLID,
 		contentID,
 		settings.BannerTitle,
 		adcampaign.RenderNameText(text, item.Value),
 		vkads.CommunityCTA(settings.TargetAction),
 		role,
-		pattern,
-	)
-	return w.vkads.CreateBanner(ctx, body)
+		vkads.PickVideoBannerPattern(patterns, role),
+	), nil
 }

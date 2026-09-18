@@ -381,60 +381,110 @@ func (s *Service) CreateURL(ctx context.Context, rawURL string) (int64, error) {
 	return out.ID, nil
 }
 
-func (s *Service) CreateAdPlan(ctx context.Context, body map[string]any) (int64, []int64, error) {
+type CreatedGroup struct {
+	ID        int64
+	BannerIDs []int64
+}
+
+func (s *Service) CreateAdPlan(ctx context.Context, body map[string]any) (int64, []CreatedGroup, error) {
 	data, err := s.Post(ctx, "/api/v2/ad_plans.json", body)
 	if err != nil {
 		return 0, nil, err
 	}
-	planID, groupIDs, err := parseCreatePlan(data)
-	if err != nil {
-		return 0, nil, err
-	}
-	return planID, groupIDs, nil
+	return parseCreatePlan(data)
 }
 
-func parseCreatePlan(data []byte) (int64, []int64, error) {
+func parseCreatePlan(data []byte) (int64, []CreatedGroup, error) {
 	var out struct {
-		ID        int64 `json:"id"`
-		Campaigns []struct {
-			ID int64 `json:"id"`
-		} `json:"campaigns"`
-		AdGroups []struct {
-			ID int64 `json:"id"`
-		} `json:"ad_groups"`
+		ID        int64           `json:"id"`
+		Campaigns []createdNested `json:"campaigns"`
+		AdGroups  []createdNested `json:"ad_groups"`
 	}
 	if err := json.Unmarshal(data, &out); err != nil || out.ID == 0 {
 		return 0, nil, fmt.Errorf("vkads ad_plan: unexpected %s", truncate(data, 300))
 	}
-	var ids []int64
+	var groups []CreatedGroup
 	for _, item := range out.Campaigns {
-		if item.ID != 0 {
-			ids = append(ids, item.ID)
+		if g := item.asCreated(); g.ID != 0 {
+			groups = append(groups, g)
 		}
 	}
 	for _, item := range out.AdGroups {
-		if item.ID != 0 {
-			ids = append(ids, item.ID)
+		if g := item.asCreated(); g.ID != 0 {
+			groups = append(groups, g)
 		}
 	}
-	return out.ID, ids, nil
+	return out.ID, groups, nil
 }
 
-func (s *Service) CreateAdGroup(ctx context.Context, body map[string]any) (int64, error) {
+type createdNested struct {
+	ID      int64 `json:"id"`
+	Banners []struct {
+		ID int64 `json:"id"`
+	} `json:"banners"`
+}
+
+func (n createdNested) asCreated() CreatedGroup {
+	g := CreatedGroup{ID: n.ID}
+	for _, b := range n.Banners {
+		if b.ID != 0 {
+			g.BannerIDs = append(g.BannerIDs, b.ID)
+		}
+	}
+	return g
+}
+
+func (s *Service) CreateAdGroup(ctx context.Context, body map[string]any) (CreatedGroup, error) {
 	data, err := s.Post(ctx, "/api/v2/campaigns.json", body)
 	if err != nil {
 		data, err = s.Post(ctx, "/api/v2/ad_groups.json", body)
 	}
 	if err != nil {
-		return 0, err
+		return CreatedGroup{}, err
 	}
-	var out struct {
-		ID int64 `json:"id"`
-	}
+	return parseCreateGroup(data)
+}
+
+func parseCreateGroup(data []byte) (CreatedGroup, error) {
+	var out createdNested
 	if err := json.Unmarshal(data, &out); err != nil || out.ID == 0 {
-		return 0, fmt.Errorf("vkads campaign: unexpected %s", truncate(data, 300))
+		return CreatedGroup{}, fmt.Errorf("vkads campaign: unexpected %s", truncate(data, 300))
 	}
-	return out.ID, nil
+	return out.asCreated(), nil
+}
+
+func (s *Service) DeleteAdGroup(ctx context.Context, id int64) error {
+	if id <= 0 {
+		return nil
+	}
+	body := map[string]any{"status": "deleted"}
+	_, err := s.Post(ctx, fmt.Sprintf("/api/v2/ad_groups/%d.json", id), body)
+	if err != nil {
+		_, err = s.Post(ctx, fmt.Sprintf("/api/v2/campaigns/%d.json", id), body)
+	}
+	return err
+}
+
+func (s *Service) ListGroupBannerIDs(ctx context.Context, groupID int64) ([]int64, error) {
+	data, err := s.Get(ctx, fmt.Sprintf("/api/v2/banners.json?_ad_group_id=%d&limit=20", groupID))
+	if err != nil {
+		return nil, err
+	}
+	var env struct {
+		Items []struct {
+			ID int64 `json:"id"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(data, &env); err != nil {
+		return nil, err
+	}
+	var ids []int64
+	for _, item := range env.Items {
+		if item.ID != 0 {
+			ids = append(ids, item.ID)
+		}
+	}
+	return ids, nil
 }
 
 func containsFold(haystack string, needles ...string) bool {
