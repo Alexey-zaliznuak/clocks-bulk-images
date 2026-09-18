@@ -64,6 +64,36 @@ func (s *Service) ListPlacementTree(ctx context.Context) ([]PadNode, error) {
 	return append([]PadNode(nil), trees...), nil
 }
 
+// PadsTreeByID fetches a single tree. The cached listing is capped at 50, and
+// the tree of a package can sit past that page.
+func (s *Service) PadsTreeByID(ctx context.Context, id int64) ([]PadNode, error) {
+	data, err := s.Get(ctx, fmt.Sprintf("/api/v2/pads_trees.json?_id=%d&limit=1", id))
+	if err != nil {
+		return nil, err
+	}
+	return ParsePadsTrees(data), nil
+}
+
+// PackageTree returns the pads tree that targetings.pads of this package must
+// belong to. Falling back to a wider set instead is what VK answers with
+// "pad(s) that's not permitted in this pad tree".
+func (s *Service) PackageTree(ctx context.Context, pkg Package) []PadNode {
+	if trees, err := s.ListPlacementTree(ctx); err == nil {
+		if tree := padsTreeForPackage(pkg, trees); len(tree) > 0 {
+			return tree
+		}
+	}
+	if pkg.PadsTreeID <= 0 {
+		return nil
+	}
+	tree, err := s.PadsTreeByID(ctx, pkg.PadsTreeID)
+	if err != nil {
+		log.Printf("vkads: дерево площадок %d недоступно: %v", pkg.PadsTreeID, err)
+		return nil
+	}
+	return tree
+}
+
 // ParsePadsTrees turns pads_trees.json into a checkbox tree.
 func ParsePadsTrees(data []byte) []PadNode {
 	var env struct {
@@ -173,6 +203,21 @@ func convertNode(raw rawPadNode, leafIDsArePads bool) PadNode {
 // of the package.
 func ResolvePads(selected []int, pkg Package, trees []PadNode) []int {
 	tree := padsTreeForPackage(pkg, trees)
+	if out := ResolvePadsInTree(selected, pkg, tree); len(out) > 0 {
+		return out
+	}
+	if len(tree) > 0 {
+		return nil
+	}
+	// The package names a tree the listing did not carry. The feed of the
+	// cabinet at large, narrowed to what the package sells, is the safest
+	// guess left.
+	return intersectPadIDs(PickVKFeedPadIDs(trees), allowedPads(pkg, nil))
+}
+
+// ResolvePadsInTree picks the placements inside the tree of the package, which
+// is the only tree targetings.pads may name.
+func ResolvePadsInTree(selected []int, pkg Package, tree []PadNode) []int {
 	allowed := allowedPads(pkg, tree)
 	if len(allowed) == 0 {
 		return nil
@@ -180,13 +225,7 @@ func ResolvePads(selected []int, pkg Package, trees []PadNode) []int {
 	if out := intersectPadIDs(selected, allowed); len(out) > 0 {
 		return out
 	}
-	feed := PickVKFeedPadIDs(tree)
-	if len(feed) == 0 {
-		// The package tree can be missing from the first page of pads_trees;
-		// the feed of the whole cabinet is still narrowed by allowed.
-		feed = PickVKFeedPadIDs(trees)
-	}
-	return intersectPadIDs(feed, allowed)
+	return intersectPadIDs(PickVKFeedPadIDs(tree), allowed)
 }
 
 // allowedPads narrows the package tree by what the package itself sells. Both
@@ -210,8 +249,9 @@ func allowedPads(pkg Package, tree []PadNode) map[int]struct{} {
 
 // PackagePadIDs lists the placements this package sells. The per-pad pattern
 // map is the precise answer — it spells out which banner patterns run on which
-// placement — while options.targetings[pads].values is merely everything the
-// pads targeting accepts cabinet-wide and must not be read as an allow-list.
+// placement. options.targetings[pads].values is deliberately ignored: it is
+// everything the pads targeting accepts cabinet-wide, and reading it as an
+// allow-list is what sent 80 placements of other trees to VK.
 func PackagePadIDs(pkg Package) []int {
 	if byPad := ParsePackagePadPatterns(pkg.Options); len(byPad) > 0 {
 		ids := make([]int, 0, len(byPad))
@@ -221,11 +261,8 @@ func PackagePadIDs(pkg Package) []int {
 		sort.Ints(ids)
 		return ids
 	}
-	values, defaults := ParsePackagePadOptions(pkg.Options)
-	if len(defaults) > 0 {
-		return defaults
-	}
-	return values
+	_, defaults := ParsePackagePadOptions(pkg.Options)
+	return defaults
 }
 
 // ParsePackagePadOptions splits options.targetings[pads] into every placement
@@ -276,11 +313,7 @@ func (s *Service) PlacementTreeForSettings(ctx context.Context, settings Setting
 	if pkg == nil {
 		return nil, fmt.Errorf("vkads: нет пакета для сообщества / отправки сообщения")
 	}
-	trees, err := s.ListPlacementTree(ctx)
-	if err != nil {
-		return nil, err
-	}
-	scoped := padsTreeForPackage(*pkg, trees)
+	scoped := s.PackageTree(ctx, *pkg)
 	if len(scoped) == 0 {
 		listed, err := s.ListPackagePads(ctx, pkg.ID)
 		if err != nil {
@@ -295,10 +328,7 @@ func (s *Service) PlacementTreeForSettings(ctx context.Context, settings Setting
 	}
 	// Default is what the upload would pick on its own — the VK feed — so the
 	// form starts out showing the choice it is actually going to make.
-	defaults := ResolvePads(nil, *pkg, trees)
-	if len(defaults) == 0 {
-		defaults = PickVKFeedPadIDs(scoped)
-	}
+	defaults := ResolvePadsInTree(nil, *pkg, scoped)
 	return &PlacementOptions{
 		Package: *pkg,
 		Trees:   PrunePadTree(scoped),
