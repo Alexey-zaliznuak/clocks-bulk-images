@@ -20,7 +20,28 @@ func (s *Service) Post(ctx context.Context, path string, body any) ([]byte, erro
 	return s.do(ctx, http.MethodPost, path, raw)
 }
 
-const listPageSize = 50
+const (
+	listPageSize     = 50
+	maxPackagePages  = 8
+	maxPadPages      = 20
+	maxSegmentPages  = 200
+)
+
+// stopAfterPage ends a VK list walk: short/empty page, no new ids, count
+// reached, or a hard page cap. packages.json ignores huge offsets and keeps
+// returning items — without this we walk past 60k and hit 429.
+func stopAfterPage(pageLen, pageSize, added, total, count, pages, maxPages int) bool {
+	if pageLen == 0 || added == 0 {
+		return true
+	}
+	if pageLen < pageSize {
+		return true
+	}
+	if count > 0 && total >= count {
+		return true
+	}
+	return maxPages > 0 && pages >= maxPages
+}
 
 type listEnvelope struct {
 	Count  int             `json:"count"`
@@ -86,7 +107,8 @@ func (s *Service) ListSegments(ctx context.Context) ([]Segment, error) {
 	s.mu.Unlock()
 
 	var all []Segment
-	for offset := 0; ; {
+	seen := map[int64]struct{}{}
+	for pages, offset := 0, 0; ; pages++ {
 		env, err := s.getList(ctx, "/api/v2/remarketing/segments.json", offset, listPageSize)
 		if err != nil {
 			return nil, err
@@ -97,13 +119,19 @@ func (s *Service) ListSegments(ctx context.Context) ([]Segment, error) {
 				return nil, fmt.Errorf("vkads segments: %w", err)
 			}
 		}
-		if len(raw) == 0 {
-			break
-		}
+		added := 0
 		for _, item := range raw {
+			if item.ID == 0 {
+				continue
+			}
+			if _, ok := seen[item.ID]; ok {
+				continue
+			}
+			seen[item.ID] = struct{}{}
 			all = append(all, Segment{ID: item.ID, Name: item.Name, Created: parseCreated(item.Created)})
+			added++
 		}
-		if env.Count > 0 && len(all) >= env.Count {
+		if stopAfterPage(len(raw), listPageSize, added, len(all), env.Count, pages+1, maxSegmentPages) {
 			break
 		}
 		offset += len(raw)
@@ -206,9 +234,13 @@ func (s *Service) ListPackages(ctx context.Context) ([]Package, error) {
 	s.mu.Unlock()
 
 	var all []Package
-	for offset := 0; ; {
+	seen := map[int64]struct{}{}
+	for pages, offset := 0, 0; ; pages++ {
 		env, err := s.getList(ctx, "/api/v2/packages.json", offset, listPageSize)
 		if err != nil {
+			if len(all) > 0 {
+				break
+			}
 			return nil, err
 		}
 		var page []Package
@@ -217,11 +249,19 @@ func (s *Service) ListPackages(ctx context.Context) ([]Package, error) {
 				return nil, fmt.Errorf("vkads packages: %w", err)
 			}
 		}
-		if len(page) == 0 {
-			break
+		added := 0
+		for _, item := range page {
+			if item.ID == 0 {
+				continue
+			}
+			if _, ok := seen[item.ID]; ok {
+				continue
+			}
+			seen[item.ID] = struct{}{}
+			all = append(all, item)
+			added++
 		}
-		all = append(all, page...)
-		if env.Count > 0 && len(all) >= env.Count {
+		if stopAfterPage(len(page), listPageSize, added, len(all), env.Count, pages+1, maxPackagePages) {
 			break
 		}
 		offset += len(page)
@@ -243,10 +283,12 @@ func (s *Service) ListRegions(ctx context.Context) ([]Region, error) {
 	s.mu.Unlock()
 
 	var all []Region
-	for offset := 0; ; {
-		env, err := s.getList(ctx, "/api/v2/regions.json", offset, listPageSize)
+	for _, q := range []string{"Россия", "Russia"} {
+		extra := url.Values{}
+		extra.Set("_q", q)
+		env, err := s.getListQuery(ctx, "/api/v2/regions.json", 0, listPageSize, extra)
 		if err != nil {
-			return nil, err
+			continue
 		}
 		var page []Region
 		if len(env.Items) > 0 {
@@ -254,14 +296,13 @@ func (s *Service) ListRegions(ctx context.Context) ([]Region, error) {
 				return nil, fmt.Errorf("vkads regions: %w", err)
 			}
 		}
-		if len(page) == 0 {
+		if russiaRegionID(page) != 0 {
+			all = page
 			break
 		}
-		all = append(all, page...)
-		if env.Count > 0 && len(all) >= env.Count {
-			break
-		}
-		offset += len(page)
+	}
+	if len(all) == 0 {
+		all = []Region{{ID: 188, Name: "Россия"}}
 	}
 	s.mu.Lock()
 	s.regions = all
@@ -276,9 +317,13 @@ func (s *Service) ListPackagePads(ctx context.Context, packageID int64) ([]Pad, 
 		extra.Set("_package_id", strconv.FormatInt(packageID, 10))
 	}
 	var all []Pad
-	for offset := 0; ; {
+	seen := map[int]struct{}{}
+	for pages, offset := 0, 0; ; pages++ {
 		env, err := s.getListQuery(ctx, "/api/v2/packages_pads.json", offset, listPageSize, extra)
 		if err != nil {
+			if len(all) > 0 {
+				break
+			}
 			return nil, err
 		}
 		var page []Pad
@@ -287,11 +332,19 @@ func (s *Service) ListPackagePads(ctx context.Context, packageID int64) ([]Pad, 
 				return nil, err
 			}
 		}
-		if len(page) == 0 {
-			break
+		added := 0
+		for _, item := range page {
+			if item.ID == 0 {
+				continue
+			}
+			if _, ok := seen[item.ID]; ok {
+				continue
+			}
+			seen[item.ID] = struct{}{}
+			all = append(all, item)
+			added++
 		}
-		all = append(all, page...)
-		if env.Count > 0 && len(all) >= env.Count {
+		if stopAfterPage(len(page), listPageSize, added, len(all), env.Count, pages+1, maxPadPages) {
 			break
 		}
 		offset += len(page)
@@ -373,11 +426,18 @@ func PickCommunityMessagePackage(packages []Package, targetAction string) *Packa
 	return fallback
 }
 
-func PickRussiaRegion(regions []Region) int64 {
+func russiaRegionID(regions []Region) int64 {
 	for _, r := range regions {
 		if containsFold(r.Name, "россия", "russia") && !containsFold(r.Name, "беларус", "казах") {
 			return r.ID
 		}
+	}
+	return 0
+}
+
+func PickRussiaRegion(regions []Region) int64 {
+	if id := russiaRegionID(regions); id != 0 {
+		return id
 	}
 	return 188
 }

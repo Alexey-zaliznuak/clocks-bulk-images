@@ -98,6 +98,27 @@ func TestPickCommunityMessagePackage(t *testing.T) {
 	}
 }
 
+func TestStopAfterPage(t *testing.T) {
+	if !stopAfterPage(0, 50, 0, 0, 0, 1, 8) {
+		t.Fatal("empty page must stop")
+	}
+	if !stopAfterPage(50, 50, 0, 50, 0, 2, 8) {
+		t.Fatal("no new ids must stop")
+	}
+	if !stopAfterPage(12, 50, 12, 62, 0, 2, 8) {
+		t.Fatal("short page must stop")
+	}
+	if !stopAfterPage(50, 50, 50, 200, 180, 4, 8) {
+		t.Fatal("count reached must stop")
+	}
+	if !stopAfterPage(50, 50, 50, 400, 0, 8, 8) {
+		t.Fatal("page cap must stop")
+	}
+	if stopAfterPage(50, 50, 50, 50, 0, 1, 8) {
+		t.Fatal("first full page with new ids should continue")
+	}
+}
+
 func TestSettingsNormalizeEmpty(t *testing.T) {
 	s := Settings{}.Normalize()
 	if s.CommunityID != DefaultCommunityID || !s.Optimization || s.AgeFrom != 24 || s.BudgetDay == nil || *s.BudgetDay != 999 {
