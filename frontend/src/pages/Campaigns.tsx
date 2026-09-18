@@ -112,8 +112,9 @@ export default function Campaigns() {
 export function lifecycleLabel(lifecycle: string): string {
   const labels: Record<string, string> = {
     draft: "Черновик",
-    running: "Выполняется",
-    completed: "Завершена",
+    running: "Подготовка креативов",
+    uploading: "Загрузка в рекламный кабинет",
+    completed: "Завершено",
   };
   return labels[lifecycle] || lifecycle;
 }
@@ -121,5 +122,6 @@ export function lifecycleLabel(lifecycle: string): string {
 export function lifecycleClasses(lifecycle: string): string {
   if (lifecycle === "draft") return "border-amber-200 bg-amber-50 text-amber-700";
   if (lifecycle === "completed") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (lifecycle === "uploading") return "border-violet-200 bg-violet-50 text-violet-700";
   return "border-blue-200 bg-blue-50 text-blue-700";
 }

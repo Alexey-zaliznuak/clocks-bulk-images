@@ -174,11 +174,14 @@ export default function CampaignCreate() {
   async function submit() {
     setError("");
     if (!title.trim()) return setError("Укажите название кампании");
-    if (names.values.length === 0 || surnames.values.length === 0) {
-      return setError("Списки имён и фамилий обязательны");
+    if (names.values.length === 0 && surnames.values.length === 0) {
+      return setError("Добавьте хотя бы одно имя или одну фамилию");
     }
-    if (!hasNamePlaceholder(nameTextTemplate) || !hasNamePlaceholder(surnameTextTemplate)) {
-      return setError("Оба рекламных текста должны содержать {{name}}");
+    if (
+      (names.values.length > 0 && !hasNamePlaceholder(nameTextTemplate)) ||
+      (surnames.values.length > 0 && !hasNamePlaceholder(surnameTextTemplate))
+    ) {
+      return setError("Текст для каждого непустого списка должен содержать {{name}}");
     }
     if (!settings.templateId.trim()) return setError("Укажите ID шаблона Иманатора");
     if (!settings.generateAudio && !settings.audioAssetId) {
@@ -419,7 +422,9 @@ function ListEditor({
         <p className="mt-1 text-xs text-slate-500">
           Пример: {applyNamePreview(template, example)}
         </p>
-        {!hasNamePlaceholder(template) && <p className="mt-1 text-xs text-red-600">Добавьте {"{{name}}"} в текст.</p>}
+        {normalized.values.length > 0 && !hasNamePlaceholder(template) && (
+          <p className="mt-1 text-xs text-red-600">Добавьте {"{{name}}"} в текст.</p>
+        )}
       </Field>
       <label
         className="block cursor-pointer rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-center transition hover:border-blue-400 hover:bg-blue-50"

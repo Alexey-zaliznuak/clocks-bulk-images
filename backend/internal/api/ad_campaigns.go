@@ -64,19 +64,16 @@ func (s *Server) handleCreateAdCampaign(w http.ResponseWriter, r *http.Request) 
 	case req.Title == "":
 		writeError(w, http.StatusBadRequest, "title is required")
 		return
-	case len(names) == 0:
-		writeError(w, http.StatusBadRequest, "names list is required")
-		return
-	case len(surnames) == 0:
-		writeError(w, http.StatusBadRequest, "surnames list is required")
+	case len(names) == 0 && len(surnames) == 0:
+		writeError(w, http.StatusBadRequest, "at least one names or surnames list is required")
 		return
 	case req.TemplateID == "":
 		writeError(w, http.StatusBadRequest, "templateId is required")
 		return
-	case !adcampaign.HasNamePlaceholder(req.NameTextTemplate):
+	case len(names) > 0 && !adcampaign.HasNamePlaceholder(req.NameTextTemplate):
 		writeError(w, http.StatusBadRequest, "nameTextTemplate must contain {{name}}")
 		return
-	case !adcampaign.HasNamePlaceholder(req.SurnameTextTemplate):
+	case len(surnames) > 0 && !adcampaign.HasNamePlaceholder(req.SurnameTextTemplate):
 		writeError(w, http.StatusBadRequest, "surnameTextTemplate must contain {{name}}")
 		return
 	}
