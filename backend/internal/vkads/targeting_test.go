@@ -34,3 +34,15 @@ func TestGroupTargetings(t *testing.T) {
 		t.Fatal("Targetings has segments, not remarketing")
 	}
 }
+
+func TestAutobiddingMode(t *testing.T) {
+	if got := autobiddingMode("min_price"); got != "max_goals" {
+		t.Fatalf("min_price = %q", got)
+	}
+	if got := autobiddingMode("max_goals"); got != "max_goals" {
+		t.Fatalf("max_goals = %q", got)
+	}
+	if got := autobiddingMode("second_price_mean"); got != "second_price_mean" {
+		t.Fatalf("second_price_mean = %q", got)
+	}
+}

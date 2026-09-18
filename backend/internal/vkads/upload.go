@@ -66,12 +66,12 @@ func PlanBody(name string, settings Settings, cat *Catalog) map[string]any {
 	body := map[string]any{
 		"name":             name,
 		"status":           "active",
-		"date_start":       cat.DateStart,
-		"objective":        cat.Package.Objective.ForAPI(),
-		"autobidding_mode": autobiddingMode(settings.BiddingStrategy, settings.Optimization),
+		"date_start": cat.DateStart,
+		"objective":  cat.Package.Objective.ForAPI(),
 	}
 	if settings.Optimization {
 		applyMoney(body, settings)
+		body["autobidding_mode"] = autobiddingMode(settings.BiddingStrategy)
 	}
 	if cat.Package.PricedGoal != nil {
 		body["priced_goal"] = cat.Package.PricedGoal
@@ -104,11 +104,11 @@ func GroupBody(name string, planID, audienceID int64, settings Settings, cat *Ca
 		"date_start":       cat.DateStart,
 		"age_restrictions": settings.AgeRestrictions,
 		"objective":        cat.Package.Objective.ForAPI(),
-		"autobidding_mode": autobiddingMode(settings.BiddingStrategy, settings.Optimization),
 		"targetings":       groupTargetings(settings, audienceID, cat.RussiaID, cat.Pads),
 	}
 	if !settings.Optimization {
 		applyMoney(body, settings)
+		body["autobidding_mode"] = autobiddingMode(settings.BiddingStrategy)
 	}
 	if cat.Package.PricedGoal != nil {
 		body["priced_goal"] = cat.Package.PricedGoal

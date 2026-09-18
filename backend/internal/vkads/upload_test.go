@@ -29,6 +29,9 @@ func TestPlanBodyBudgetStringWhenOptimized(t *testing.T) {
 	if !ok || got != "999" {
 		t.Fatalf("plan budget_limit_day = %#v", body["budget_limit_day"])
 	}
+	if body["autobidding_mode"] != "max_goals" {
+		t.Fatalf("plan autobidding_mode = %#v", body["autobidding_mode"])
+	}
 	if _, ok := body["ad_groups"]; ok {
 		t.Fatal("plan must not send empty ad_groups")
 	}
@@ -44,6 +47,9 @@ func TestPlanBodyBudgetStringWhenOptimized(t *testing.T) {
 	group := NestedGroupBody("Гущин", 77, testSettings(true, 999), testCatalog())
 	if _, ok := group["ad_plan_id"]; ok {
 		t.Fatal("nested group must not have ad_plan_id")
+	}
+	if _, ok := group["autobidding_mode"]; ok {
+		t.Fatal("optimized group must inherit autobidding_mode from the plan")
 	}
 	AttachCampaigns(body, []map[string]any{group})
 	list, _ := body["campaigns"].([]any)
@@ -63,6 +69,9 @@ func TestGroupBodyOmitsBudgetWhenOptimized(t *testing.T) {
 	if _, ok := body["enable_utm"]; ok {
 		t.Fatal("package does not allow enable_utm")
 	}
+	if _, ok := body["autobidding_mode"]; ok {
+		t.Fatal("optimized group must inherit autobidding_mode from the plan")
+	}
 }
 
 func TestGroupBodyBudgetWhenNotOptimized(t *testing.T) {
@@ -75,6 +84,12 @@ func TestGroupBodyBudgetWhenNotOptimized(t *testing.T) {
 	got, ok := group["budget_limit_day"].(string)
 	if !ok || got != "999" {
 		t.Fatalf("group budget_limit_day = %#v", group["budget_limit_day"])
+	}
+	if group["autobidding_mode"] != "max_goals" {
+		t.Fatalf("group autobidding_mode = %#v", group["autobidding_mode"])
+	}
+	if _, ok := plan["autobidding_mode"]; ok {
+		t.Fatal("plan without optimization must not send autobidding_mode")
 	}
 }
 
