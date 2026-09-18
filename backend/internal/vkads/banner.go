@@ -604,11 +604,10 @@ func BannerBody(name string, groupID, urlID, videoID, imageID int64, title, text
 	content := map[string]any{}
 	blocks := map[string]any{}
 	var slots []BannerSlot
+	// The pattern is not a banner field: VK infers it from the content,
+	// textblock and url roles, then checks it against the package allow-list.
 	if pattern != nil {
 		slots = pattern.Format
-		if pattern.ID > 0 {
-			body["patterns"] = []int64{pattern.ID}
-		}
 	}
 	for _, slot := range slots {
 		switch slot.Field {

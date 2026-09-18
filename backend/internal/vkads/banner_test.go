@@ -137,9 +137,8 @@ func TestBannerBodyUsesPackagePattern(t *testing.T) {
 	if _, ok := body["ad_group_id"]; ok {
 		t.Fatal("nested banner must omit ad_group_id")
 	}
-	ids, _ := body["patterns"].([]int64)
-	if len(ids) != 1 || ids[0] != 486 {
-		t.Fatalf("patterns = %#v", body["patterns"])
+	if _, ok := body["patterns"]; ok {
+		t.Fatal("banner has no patterns field, VK infers it from the roles")
 	}
 }
 
