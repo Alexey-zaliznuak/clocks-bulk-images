@@ -259,6 +259,7 @@ func ParsePackagePadOptions(raw json.RawMessage) (values, defaults []int) {
 type PlacementOptions struct {
 	Package Package
 	Trees   []PadNode
+	// Default is the preselection for a fresh campaign: the VK feed.
 	Default []int
 }
 
@@ -292,7 +293,12 @@ func (s *Service) PlacementTreeForSettings(ctx context.Context, settings Setting
 	if narrowed := FilterPadTree(scoped, allowedPads(*pkg, scoped)); len(narrowed) > 0 {
 		scoped = narrowed
 	}
-	_, defaults := ParsePackagePadOptions(pkg.Options)
+	// Default is what the upload would pick on its own — the VK feed — so the
+	// form starts out showing the choice it is actually going to make.
+	defaults := ResolvePads(nil, *pkg, trees)
+	if len(defaults) == 0 {
+		defaults = PickVKFeedPadIDs(scoped)
+	}
 	return &PlacementOptions{
 		Package: *pkg,
 		Trees:   PrunePadTree(scoped),

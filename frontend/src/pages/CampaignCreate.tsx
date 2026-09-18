@@ -93,14 +93,17 @@ export default function CampaignCreate() {
   const [padsLoading, setPadsLoading] = useState(false);
   const [padsError, setPadsError] = useState("");
   const [padsPackage, setPadsPackage] = useState("");
+  const padsTouched = useRef(false);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
   }, [settings]);
 
   // The placements on offer belong to the package the target action picks, so
-  // the tree is reloaded whenever that action changes.
+  // the tree is reloaded whenever that action changes. Waiting for the saved
+  // settings keeps them from overwriting the preselection below.
   useEffect(() => {
+    if (loadingDefaults) return;
     setPadsLoading(true);
     let current = true;
     api.vkAdsPads(vkSettings.targetAction)
@@ -109,6 +112,12 @@ export default function CampaignCreate() {
         setPadTrees(res.trees || []);
         setPadsPackage(res.packageName || "");
         setPadsError("");
+        // Preselect the VK feed once, and only while nothing is chosen, so
+        // clearing every checkbox stays a deliberate choice.
+        if (!padsTouched.current && res.defaultPads?.length) {
+          padsTouched.current = true;
+          setVkSettings((s) => (s.pads?.length ? s : { ...s, pads: res.defaultPads || [] }));
+        }
       })
       .catch((e) => {
         if (current) setPadsError(e instanceof Error ? e.message : "Не удалось загрузить площадки");
@@ -119,7 +128,7 @@ export default function CampaignCreate() {
     return () => {
       current = false;
     };
-  }, [vkSettings.targetAction]);
+  }, [vkSettings.targetAction, loadingDefaults]);
 
   useEffect(() => {
     api.campaignDefaults()
