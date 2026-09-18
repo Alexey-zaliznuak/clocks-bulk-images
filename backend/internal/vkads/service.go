@@ -33,6 +33,8 @@ type Service struct {
 	vkTok      cached
 	segments   []Segment
 	segmentsAt time.Time
+	pads       []PadNode
+	padsAt     time.Time
 }
 
 type cached struct {

@@ -83,6 +83,31 @@ func TestVKAdvertTokenSendsAccountName(t *testing.T) {
 	}
 }
 
+func TestVKAdvertTokenAcceptsCamelCase(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code":    200,
+			"message": "OK",
+			"response": map[string]any{
+				"accessToken": "vk-camel",
+				"expiresAt":   1_800_000_000,
+			},
+		})
+	}))
+	defer srv.Close()
+
+	tok, err := New(srv.URL, "secret-key", time.Second).VKAdvertToken(context.Background(), "zaley-tok", "Юлия тесты")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tok.AccessToken != "vk-camel" {
+		t.Fatalf("token = %q", tok.AccessToken)
+	}
+	if !tok.ExpiresAt.Equal(time.Unix(1_800_000_000, 0)) {
+		t.Fatalf("expires = %v", tok.ExpiresAt)
+	}
+}
+
 func TestEnvelopeError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{

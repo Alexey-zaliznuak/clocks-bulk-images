@@ -93,12 +93,22 @@ def zaley_request(
     return payload
 
 
+def token_from_response(payload: dict[str, Any]) -> str:
+    body = payload.get("response") or {}
+    if not isinstance(body, dict):
+        return ""
+    return str(body.get("access_token") or body.get("accessToken") or "").strip()
+
+
 def get_zaley_token(secret: str) -> dict[str, Any]:
     payload = zaley_request("POST", "/api/v2/token", secret)
-    token = (payload.get("response") or {}).get("access_token")
+    token = token_from_response(payload)
     if not token:
         raise ApiError("В ответе /api/v2/token нет access_token", payload)
-    return payload["response"]
+    body = payload["response"]
+    if "access_token" not in body:
+        body["access_token"] = token
+    return body
 
 
 def list_vk_accounts(zaley_token: str) -> list[dict[str, Any]]:
@@ -117,10 +127,13 @@ def get_vk_ads_token(zaley_token: str, account_name: str) -> dict[str, Any]:
         zaley_token,
         {"account_id": account_name},
     )
-    token = (payload.get("response") or {}).get("access_token")
+    token = token_from_response(payload)
     if not token:
         raise ApiError("В ответе /api/v2/vk_advert/token нет access_token", payload)
-    return payload["response"]
+    body = payload["response"]
+    if isinstance(body, dict) and "access_token" not in body:
+        body["access_token"] = token
+    return body
 
 
 def login_vk_ads(vk_token: str) -> dict[str, Any]:

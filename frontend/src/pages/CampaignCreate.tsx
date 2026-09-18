@@ -10,7 +10,9 @@ import {
 import ConfirmDialog from "../components/ConfirmDialog";
 import { formatDuration } from "../format";
 import { DEFAULT_VIDEO_MODEL } from "../settings";
-import { defaultVKSettings, parseOptionalNumber, parsePadList, type VKSettings } from "../vkSettings";
+import PadsTree from "../components/PadsTree";
+import { type PadNode } from "../padsTree";
+import { defaultVKSettings, parseOptionalNumber, type VKSettings } from "../vkSettings";
 
 type ListTab = "names" | "surnames";
 type SettingsTab = "campaign" | "group" | "ads" | "generation";
@@ -87,7 +89,9 @@ export default function CampaignCreate() {
   const [error, setError] = useState("");
   const [vkSettings, setVkSettings] = useState<VKSettings>(defaultVKSettings);
   const [vkConfigured, setVkConfigured] = useState(true);
-  const [padText, setPadText] = useState("");
+  const [padTrees, setPadTrees] = useState<PadNode[]>([]);
+  const [padsLoading, setPadsLoading] = useState(false);
+  const [padsError, setPadsError] = useState("");
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
@@ -105,9 +109,7 @@ export default function CampaignCreate() {
         setDefaultNameDiagnostics(res.diagnostics.names);
         setDefaultSurnameDiagnostics(res.diagnostics.surnames);
         if (res.vkSettings) {
-          const next = { ...defaultVKSettings(), ...res.vkSettings };
-          setVkSettings(next);
-          setPadText((next.pads || []).join(", "));
+          setVkSettings({ ...defaultVKSettings(), ...res.vkSettings });
         }
       })
       .catch((e) => setDefaultsError(e instanceof Error ? e.message : "Не удалось загрузить списки"))
@@ -130,6 +132,11 @@ export default function CampaignCreate() {
         setSettings((s) => ({ ...s, videoModel: s.videoModel || res.defaultModel }));
       })
       .catch((e) => setModelsError(e instanceof Error ? e.message : "Не удалось загрузить модели"));
+    setPadsLoading(true);
+    api.vkAdsPads()
+      .then((res) => setPadTrees(res.trees || []))
+      .catch((e) => setPadsError(e instanceof Error ? e.message : "Не удалось загрузить площадки"))
+      .finally(() => setPadsLoading(false));
     api.listAudio()
       .then((res) => {
         setAudio(res.assets || []);
@@ -243,7 +250,7 @@ export default function CampaignCreate() {
         audioAssetId: settings.generateAudio ? "" : settings.audioAssetId,
         vkSettings: {
           ...vkSettings,
-          pads: parsePadList(padText),
+          pads: vkSettings.pads || [],
           budgetDay: vkSettings.budgetDay,
           budgetTotal: vkSettings.budgetTotal,
           maxPrice: vkSettings.maxPrice,
@@ -460,14 +467,21 @@ export default function CampaignCreate() {
                 />
                 <span className="text-sm text-slate-700">Включать возраст «не определён»</span>
               </label>
-              <Field label="Места размещения (id через запятую, пусто = лента ВК)">
-                <input
-                  className={inputCls}
-                  value={padText}
-                  placeholder="по умолчанию только лента ВК"
-                  onChange={(e) => setPadText(e.target.value)}
+              <div>
+                <span className="mb-1 block text-sm text-slate-500">Места размещения</span>
+                <PadsTree
+                  trees={padTrees}
+                  selected={vkSettings.pads || []}
+                  onChange={(pads) => setVkSettings((s) => ({ ...s, pads }))}
+                  loading={padsLoading}
+                  error={padsError}
                 />
-              </Field>
+                <p className="mt-1 text-xs text-slate-500">
+                  {vkSettings.pads?.length
+                    ? `Выбрано площадок: ${vkSettings.pads.length}`
+                    : "Ничего не выбрано — при загрузке возьмём ленту ВК."}
+                </p>
+              </div>
               <p className="text-xs text-slate-500">
                 Время 6–21, регион Россия, расширение аудитории выключено — эти поля не настраиваются.
               </p>

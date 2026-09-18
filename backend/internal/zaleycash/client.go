@@ -63,8 +63,24 @@ type envelope struct {
 }
 
 type tokenBody struct {
-	AccessToken string `json:"access_token"`
-	ExpiresAt   int64  `json:"expires_at"`
+	AccessTokenSnake string `json:"access_token"`
+	AccessTokenCamel string `json:"accessToken"`
+	ExpiresAtSnake   int64  `json:"expires_at"`
+	ExpiresAtCamel   int64  `json:"expiresAt"`
+}
+
+func (t tokenBody) accessToken() string {
+	if t.AccessTokenSnake != "" {
+		return t.AccessTokenSnake
+	}
+	return strings.TrimSpace(t.AccessTokenCamel)
+}
+
+func (t tokenBody) expiresAt() int64 {
+	if t.ExpiresAtSnake != 0 {
+		return t.ExpiresAtSnake
+	}
+	return t.ExpiresAtCamel
 }
 
 func (c *Client) postToken(ctx context.Context, path, bearer string, body map[string]string) (Token, error) {
@@ -113,14 +129,16 @@ func (c *Client) postToken(ctx context.Context, path, bearer string, body map[st
 	if err := json.Unmarshal(env.Response, &tok); err != nil {
 		return Token{}, fmt.Errorf("zaleycash %s: decode response: %w (body=%s)", path, err, string(data))
 	}
-	if tok.AccessToken == "" {
-		return Token{}, fmt.Errorf("zaleycash %s: empty access_token", path)
+	access := tok.accessToken()
+	if access == "" {
+		return Token{}, fmt.Errorf("zaleycash %s: empty access_token (body=%s)", path, string(data))
 	}
-	expires := time.Unix(tok.ExpiresAt, 0)
-	if tok.ExpiresAt == 0 {
+	expiresUnix := tok.expiresAt()
+	expires := time.Unix(expiresUnix, 0)
+	if expiresUnix == 0 {
 		expires = time.Now().Add(defaultZaleyTTL)
 	}
-	return Token{AccessToken: tok.AccessToken, ExpiresAt: expires}, nil
+	return Token{AccessToken: access, ExpiresAt: expires}, nil
 }
 
 // HTTPError is a ZaleyCash API failure, either an HTTP status or an envelope code.

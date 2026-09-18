@@ -46,10 +46,3 @@ export function parseOptionalNumber(value: string): number | null {
   const n = Number(trimmed);
   return Number.isFinite(n) ? n : null;
 }
-
-export function parsePadList(value: string): number[] {
-  return value
-    .split(/[,\s]+/)
-    .map((part) => Number(part))
-    .filter((n) => Number.isInteger(n) && n > 0);
-}

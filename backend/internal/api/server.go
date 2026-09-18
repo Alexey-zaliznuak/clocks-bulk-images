@@ -102,6 +102,7 @@ func (s *Server) Router() http.Handler {
 		pr.Use(s.auth.Middleware)
 		pr.Get("/api/config", s.handleConfig)
 		pr.Get("/api/vk-ads/status", s.handleVKAdsStatus)
+		pr.Get("/api/vk-ads/pads", s.handleVKAdsPads)
 		pr.Get("/api/models", s.handleModels)
 		pr.Post("/api/tasks/batch", s.handleCreateBatch)
 		pr.Get("/api/tasks", s.handleListTasks)
@@ -196,6 +197,28 @@ func (s *Server) handleVKAdsStatus(w http.ResponseWriter, r *http.Request) {
 		"ok":          true,
 		"accountName": s.vkads.AccountName(),
 		"user":        user,
+	})
+}
+
+func (s *Server) handleVKAdsPads(w http.ResponseWriter, r *http.Request) {
+	if s.vkads == nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"configured": false,
+			"trees":      []vkads.PadNode{},
+		})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	defer cancel()
+	trees, err := s.vkads.ListPlacementTree(ctx)
+	if err != nil {
+		log.Printf("api: vk ads pads: %v", err)
+		writeError(w, http.StatusBadGateway, "не удалось загрузить места размещения ВКР")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"configured": true,
+		"trees":      trees,
 	})
 }
 

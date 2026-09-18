@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, type AdCampaign, type AdCampaignItem } from "../api";
 import ConfirmDialog from "../components/ConfirmDialog";
 import { formatRub, formatUsd } from "../format";
+import { padLabels, type PadNode } from "../padsTree";
 import { statusClasses, statusLabel } from "../status";
 import { lifecycleClasses, lifecycleLabel } from "./Campaigns";
 
@@ -27,6 +28,7 @@ export default function CampaignDetail() {
   const [retryingAll, setRetryingAll] = useState(false);
   const [retryingItem, setRetryingItem] = useState<string | null>(null);
   const [message, setMessage] = useState("");
+  const [padTrees, setPadTrees] = useState<PadNode[]>([]);
 
   const loadCampaign = useCallback(async () => {
     try {
@@ -63,6 +65,9 @@ export default function CampaignDetail() {
   useEffect(() => {
     void loadCampaign();
     void loadItems();
+    api.vkAdsPads()
+      .then((res) => setPadTrees(res.trees || []))
+      .catch(() => {});
   }, [loadCampaign, loadItems]);
 
   useEffect(() => {
@@ -228,6 +233,14 @@ export default function CampaignDetail() {
           <ReadField
             label="Демография"
             value={`${campaign.vkSettings?.sex === "female" ? "женский" : campaign.vkSettings?.sex === "all" ? "все" : "мужской"}, ${campaign.vkSettings?.ageFrom ?? 24}–${campaign.vkSettings?.ageTo ?? 65}, ${campaign.vkSettings?.ageRestrictions || "0+"}`}
+          />
+          <ReadField
+            label="Места размещения"
+            value={
+              campaign.vkSettings?.pads?.length
+                ? (padLabels(padTrees, campaign.vkSettings.pads).join(", ") || campaign.vkSettings.pads.join(", "))
+                : "лента ВК (по умолчанию)"
+            }
           />
           <ReadField label="REF-метки" value={campaign.vkSettings?.refTags || "—"} />
           {campaign.vkUploadError && (
