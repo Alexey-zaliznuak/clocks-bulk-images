@@ -159,6 +159,24 @@ func TestPackagePadIDsPrefersPatternMapOverValues(t *testing.T) {
 	}
 }
 
+func TestPackagePadIDsIgnoresCabinetWideValues(t *testing.T) {
+	// Without a per-pad map only "default" is a statement about this package;
+	// "values" lists what the pads targeting accepts anywhere in the cabinet.
+	pkg := Package{Options: []byte(`{"targetings":[{"name":"pads","default":[1265106],"values":[1265106,38277,6245,2263324]}]}`)}
+	got := PackagePadIDs(pkg)
+	if len(got) != 1 || got[0] != 1265106 {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestResolvePadsInTreeKeepsSelectionInsideTheTree(t *testing.T) {
+	pkg := Package{ID: 3122, PadsTreeID: 27}
+	got := ResolvePadsInTree([]int{1010345, 38277, 6245}, pkg, cabinetVKTree())
+	if len(got) != 1 || got[0] != 1010345 {
+		t.Fatalf("got %v", got)
+	}
+}
+
 func TestResolvePadsDropsPadsOutsideThePackage(t *testing.T) {
 	// A selection made before the form was narrowed: most of these belong to
 	// other packages and VK answers "not permitted in this pad tree".

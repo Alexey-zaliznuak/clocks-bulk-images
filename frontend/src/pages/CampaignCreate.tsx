@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type DragEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, type CampaignDiagnostics, type MediaAsset, type VideoModel } from "../api";
 import {
