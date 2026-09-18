@@ -35,6 +35,12 @@ func TestPlanBodyBudgetStringWhenOptimized(t *testing.T) {
 	if _, ok := body["enable_utm"]; ok {
 		t.Fatal("ad_plan does not accept enable_utm")
 	}
+	if _, ok := body["ad_object_type"]; ok {
+		t.Fatal("AdPlan has no ad_object_type")
+	}
+	if _, ok := body["ad_object_id"]; ok {
+		t.Fatal("AdPlan has no ad_object_id")
+	}
 	group := NestedGroupBody("Гущин", 77, testSettings(true, 999), testCatalog())
 	if _, ok := group["ad_plan_id"]; ok {
 		t.Fatal("nested group must not have ad_plan_id")
@@ -53,6 +59,9 @@ func TestGroupBodyOmitsBudgetWhenOptimized(t *testing.T) {
 	}
 	if body["name"] != "Иван" {
 		t.Fatalf("group name = %#v", body["name"])
+	}
+	if _, ok := body["enable_utm"]; ok {
+		t.Fatal("package does not allow enable_utm")
 	}
 }
 

@@ -81,7 +81,7 @@ func TestTextListObjective(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"id":2,"objective":["socialengagement","community"]}`), &many); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(many.Objective), "community") || many.Objective.ForAPI() != "community" {
+	if !strings.Contains(string(many.Objective), "community") || many.Objective.ForAPI() != "socialengagement" {
 		t.Fatalf("array objective = %q", many.Objective)
 	}
 }

@@ -197,8 +197,13 @@ func (t *textList) UnmarshalJSON(data []byte) error {
 
 func (t textList) ForAPI() string {
 	fields := strings.Fields(string(t))
+	prefer := []string{"socialengagement", "engagement", "community"}
+	have := make(map[string]string, len(fields))
 	for _, v := range fields {
-		if strings.EqualFold(v, "community") {
+		have[strings.ToLower(v)] = v
+	}
+	for _, name := range prefer {
+		if v, ok := have[name]; ok {
 			return v
 		}
 	}

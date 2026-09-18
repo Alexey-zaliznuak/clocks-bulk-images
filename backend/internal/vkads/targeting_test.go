@@ -30,8 +30,7 @@ func TestGroupTargetings(t *testing.T) {
 	if len(segs) != 1 || segs[0] != 77 {
 		t.Fatalf("segments = %v", segs)
 	}
-	rm, _ := got["remarketing"].([]int64)
-	if len(rm) != 1 || rm[0] != 77 {
-		t.Fatalf("remarketing = %v", rm)
+	if _, ok := got["remarketing"]; ok {
+		t.Fatal("Targetings has segments, not remarketing")
 	}
 }

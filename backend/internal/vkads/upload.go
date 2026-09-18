@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -40,6 +41,9 @@ func (s *Service) ResolveCatalog(ctx context.Context, settings Settings, created
 		pads = PickVKFeedPads(listed)
 	}
 	communityURL := fmt.Sprintf("https://vk.com/club%d", settings.CommunityID)
+	if tags := strings.TrimSpace(settings.RefTags); tags != "" {
+		communityURL += "?" + strings.TrimPrefix(tags, "?")
+	}
 	urlID, err := s.CreateURL(ctx, communityURL)
 	if err != nil {
 		return nil, err
@@ -64,8 +68,6 @@ func PlanBody(name string, settings Settings, cat *Catalog) map[string]any {
 		"status":           "active",
 		"date_start":       cat.DateStart,
 		"objective":        cat.Package.Objective.ForAPI(),
-		"ad_object_type":   "url",
-		"ad_object_id":     cat.URLID,
 		"autobidding_mode": autobiddingMode(settings.BiddingStrategy, settings.Optimization),
 	}
 	if settings.Optimization {
@@ -101,8 +103,6 @@ func GroupBody(name string, planID, audienceID int64, settings Settings, cat *Ca
 		"package_id":       cat.Package.ID,
 		"date_start":       cat.DateStart,
 		"age_restrictions": settings.AgeRestrictions,
-		"enable_utm":       false,
-		"utm":              settings.RefTags,
 		"objective":        cat.Package.Objective.ForAPI(),
 		"autobidding_mode": autobiddingMode(settings.BiddingStrategy, settings.Optimization),
 		"targetings":       groupTargetings(settings, audienceID, cat.RussiaID, cat.Pads),
