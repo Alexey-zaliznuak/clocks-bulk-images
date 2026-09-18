@@ -76,6 +76,76 @@ func (f *BannerFormat) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+func isPatternKey(key string) bool {
+	switch strings.ToLower(strings.ReplaceAll(key, "-", "_")) {
+	case "patterns", "banner_patterns", "pattern_ids", "pattern":
+		return true
+	default:
+		return false
+	}
+}
+
+func collectPatternIDs(v any) []int64 {
+	switch t := v.(type) {
+	case []any:
+		var ids []int64
+		for _, item := range t {
+			ids = append(ids, collectPatternIDs(item)...)
+		}
+		return ids
+	case float64:
+		if t > 0 {
+			return []int64{int64(t)}
+		}
+	case json.Number:
+		if n, err := t.Int64(); err == nil && n > 0 {
+			return []int64{n}
+		}
+	case string:
+		if n, err := strconv.ParseInt(strings.TrimSpace(t), 10, 64); err == nil && n > 0 {
+			return []int64{n}
+		}
+	case map[string]any:
+		if id := positiveInt64(t["id"]); id > 0 {
+			return []int64{id}
+		}
+		var ids []int64
+		for _, key := range []string{"values", "defaults", "ids", "items"} {
+			if child, ok := t[key]; ok {
+				ids = append(ids, collectPatternIDs(child)...)
+			}
+		}
+		return ids
+	}
+	return nil
+}
+
+func positiveInt64(v any) int64 {
+	switch n := v.(type) {
+	case float64:
+		if n > 0 {
+			return int64(n)
+		}
+	case json.Number:
+		if id, err := n.Int64(); err == nil && id > 0 {
+			return id
+		}
+	case int64:
+		if n > 0 {
+			return n
+		}
+	case int:
+		if n > 0 {
+			return int64(n)
+		}
+	case string:
+		if id, err := strconv.ParseInt(strings.TrimSpace(n), 10, 64); err == nil && id > 0 {
+			return id
+		}
+	}
+	return 0
+}
+
 func ParsePackagePatternIDs(raw json.RawMessage) []int64 {
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return nil
@@ -87,33 +157,34 @@ func ParsePackagePatternIDs(raw json.RawMessage) []int64 {
 	var ids []int64
 	var walk func(any, string)
 	walk = func(v any, key string) {
+		if isPatternKey(key) {
+			ids = append(ids, collectPatternIDs(v)...)
+			return
+		}
 		switch t := v.(type) {
 		case map[string]any:
 			for k, child := range t {
 				walk(child, k)
 			}
 		case []any:
-			if key == "patterns" || key == "banner_patterns" || key == "pattern_ids" {
-				for _, item := range t {
-					switch n := item.(type) {
-					case float64:
-						if n > 0 {
-							ids = append(ids, int64(n))
-						}
-					case json.Number:
-						if v, err := n.Int64(); err == nil && v > 0 {
-							ids = append(ids, v)
-						}
-					}
-				}
-				return
-			}
 			for _, child := range t {
 				walk(child, key)
 			}
 		}
 	}
 	walk(root, "")
+	if len(ids) == 0 {
+		if arr, ok := root.([]any); ok {
+			ids = collectPatternIDs(arr)
+		}
+	}
+	return uniqueInt64s(ids)
+}
+
+func PackageAllowedPatternIDs(pkg Package) []int64 {
+	ids := append([]int64{}, pkg.PatternIDs...)
+	ids = append(ids, ParsePackagePatternIDs(pkg.Options)...)
+	ids = append(ids, ParsePackagePatternIDs(pkg.Format)...)
 	return uniqueInt64s(ids)
 }
 
@@ -183,38 +254,37 @@ func (s *Service) ListBannerPatterns(ctx context.Context) ([]BannerPattern, erro
 }
 
 func (s *Service) ListPackagePatterns(ctx context.Context, pkg Package) ([]BannerPattern, error) {
-	ids := pkg.PatternIDs
-	if len(ids) == 0 {
-		ids = ParsePackagePatternIDs(pkg.Options)
-	}
+	ids := PackageAllowedPatternIDs(pkg)
 	if len(ids) == 0 && pkg.ID != 0 {
-		data, err := s.Get(ctx, fmt.Sprintf("/api/v2/packages/%d.json?fields=id,options", pkg.ID))
+		data, err := s.Get(ctx, fmt.Sprintf("/api/v2/packages/%d.json?fields=id,options,format", pkg.ID))
 		if err == nil {
 			var one Package
 			if json.Unmarshal(data, &one) == nil {
-				ids = ParsePackagePatternIDs(one.Options)
+				ids = PackageAllowedPatternIDs(one)
 			}
 		}
 	}
-	all, err := s.ListBannerPatterns(ctx)
-	if err != nil {
-		return nil, err
-	}
 	if len(ids) == 0 {
-		return all, nil
+		return nil, fmt.Errorf("vkads: пакет %d не задаёт паттерны объявлений в options", pkg.ID)
 	}
-	want := map[int64]struct{}{}
-	for _, id := range ids {
-		want[id] = struct{}{}
-	}
-	var out []BannerPattern
-	for _, p := range all {
-		if _, ok := want[p.ID]; ok {
-			out = append(out, p)
+	out := s.fetchPatternsByIDs(ctx, ids)
+	if len(out) == 0 {
+		all, err := s.ListBannerPatterns(ctx)
+		if err != nil {
+			return nil, err
+		}
+		want := map[int64]struct{}{}
+		for _, id := range ids {
+			want[id] = struct{}{}
+		}
+		for _, p := range all {
+			if _, ok := want[p.ID]; ok {
+				out = append(out, p)
+			}
 		}
 	}
 	if len(out) == 0 {
-		out = s.fetchPatternsByIDs(ctx, ids)
+		return nil, fmt.Errorf("vkads: паттерны пакета %d не найдены: %v", pkg.ID, ids)
 	}
 	return out, nil
 }
@@ -229,6 +299,7 @@ func (s *Service) fetchPatternsByIDs(ctx context.Context, ids []int64) []BannerP
 	}
 	env, err := s.getListQuery(ctx, "/api/v2/banner_patterns.json", 0, listPageSize, url.Values{
 		"_id__in": {strings.Join(parts, ",")},
+		"fields":  {"id,name,description,format"},
 	})
 	if err != nil || len(env.Items) == 0 {
 		return nil
@@ -332,6 +403,9 @@ func BannerBody(name string, groupID, urlID, videoID, imageID int64, title, text
 	var slots []BannerSlot
 	if pattern != nil {
 		slots = pattern.Format
+		if pattern.ID > 0 {
+			body["patterns"] = []int64{pattern.ID}
+		}
 	}
 	for _, slot := range slots {
 		switch slot.Field {
@@ -375,6 +449,9 @@ func PickPackageBannerPattern(patterns []BannerPattern, videoRole string, haveIm
 	var best *BannerPattern
 	bestScore := -1
 	for i := range patterns {
+		if isCatchAllPattern(patterns[i]) {
+			continue
+		}
 		p := &patterns[i]
 		score := packagePatternScore(*p, videoRole, haveImage)
 		if score < 0 {
@@ -388,10 +465,18 @@ func PickPackageBannerPattern(patterns []BannerPattern, videoRole string, haveIm
 	if best != nil {
 		return best
 	}
-	if len(patterns) > 0 {
-		return &patterns[0]
+	for i := range patterns {
+		if isCatchAllPattern(patterns[i]) {
+			continue
+		}
+		return &patterns[i]
 	}
 	return nil
+}
+
+func isCatchAllPattern(p BannerPattern) bool {
+	name := strings.ToLower(p.Name)
+	return strings.Contains(name, "all_pattern") || strings.Contains(name, "all_patters")
 }
 
 func packagePatternScore(p BannerPattern, videoRole string, haveImage bool) int {

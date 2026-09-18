@@ -12,6 +12,28 @@ func TestParsePackagePatternIDs(t *testing.T) {
 	}
 }
 
+func TestParsePackagePatternIDsFromValues(t *testing.T) {
+	got := ParsePackagePatternIDs([]byte(`{"targetings":{"pads":{"values":[3417,5206]}},"settings":{"patterns":{"values":[486,422,525,527],"defaults":[486]}}}`))
+	if len(got) != 4 || got[0] != 486 || got[3] != 527 {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestParsePackagePatternIDsFromObjects(t *testing.T) {
+	got := ParsePackagePatternIDs([]byte(`{"settings":{"banner":{"patterns":[{"id":486},{"id":422}]}}}`))
+	if len(got) != 2 || got[0] != 486 || got[1] != 422 {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestPackageAllowedPatternIDsUsesFormat(t *testing.T) {
+	pkg := Package{Format: []byte(`[486,422,525]`)}
+	got := PackageAllowedPatternIDs(pkg)
+	if len(got) != 3 || got[0] != 486 {
+		t.Fatalf("got %v", got)
+	}
+}
+
 func TestBannerBodyUsesPackagePattern(t *testing.T) {
 	pattern := &BannerPattern{ID: 486, Format: []BannerSlot{
 		{Field: "url", Role: "primary", Required: true},
@@ -32,6 +54,10 @@ func TestBannerBodyUsesPackagePattern(t *testing.T) {
 	if _, ok := body["ad_group_id"]; ok {
 		t.Fatal("nested banner must omit ad_group_id")
 	}
+	ids, _ := body["patterns"].([]int64)
+	if len(ids) != 1 || ids[0] != 486 {
+		t.Fatalf("patterns = %#v", body["patterns"])
+	}
 }
 
 func TestPickPackageBannerPattern(t *testing.T) {
@@ -44,6 +70,23 @@ func TestPickPackageBannerPattern(t *testing.T) {
 			{Field: "url", Role: "primary", Required: true},
 			{Field: "content", Role: "video_vertical", Required: true},
 			{Field: "textblock", Role: "title_40_vkads", Required: true},
+		}},
+	}
+	got := PickPackageBannerPattern(patterns, "video_vertical", false)
+	if got == nil || got.ID != 486 {
+		t.Fatalf("got %#v", got)
+	}
+}
+
+func TestPickPackageBannerPatternSkipsCatchAll(t *testing.T) {
+	patterns := []BannerPattern{
+		{ID: 349, Name: "all_patters_type", Description: "видео", Format: []BannerSlot{
+			{Field: "url", Role: "primary", Required: true},
+			{Field: "content", Role: "video_vertical", Required: true},
+		}},
+		{ID: 486, Name: "community video", Format: []BannerSlot{
+			{Field: "url", Role: "primary", Required: true},
+			{Field: "content", Role: "video_vertical", Required: true},
 		}},
 	}
 	got := PickPackageBannerPattern(patterns, "video_vertical", false)

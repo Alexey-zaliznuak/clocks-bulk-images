@@ -170,6 +170,7 @@ type Package struct {
 	Description string          `json:"description"`
 	PadsTreeID  int64           `json:"pads_tree_id"`
 	Options     json.RawMessage `json:"options"`
+	Format      json.RawMessage `json:"format"`
 	PatternIDs  []int64         `json:"-"`
 }
 
@@ -268,7 +269,7 @@ func (s *Service) ListPackages(ctx context.Context) ([]Package, error) {
 				continue
 			}
 			seen[item.ID] = struct{}{}
-			item.PatternIDs = ParsePackagePatternIDs(item.Options)
+			item.PatternIDs = PackageAllowedPatternIDs(item)
 			all = append(all, item)
 			added++
 		}
