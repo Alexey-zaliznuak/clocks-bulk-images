@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/url"
 	"path/filepath"
@@ -308,8 +309,12 @@ func (s *Service) ListBannerPatterns(ctx context.Context) ([]BannerPattern, erro
 
 func (s *Service) ListPackagePatterns(ctx context.Context, pkg Package) ([]BannerPattern, error) {
 	ids := PackageAllowedPatternIDs(pkg)
+	var fetchedPath string
+	var fetchedBody []byte
 	if len(ids) == 0 && pkg.ID != 0 {
-		if one, err := s.fetchPackage(ctx, pkg.ID); err == nil {
+		one, path, data, err := s.fetchPackage(ctx, pkg.ID)
+		fetchedPath, fetchedBody = path, data
+		if err == nil {
 			pkg = one
 			ids = PackageAllowedPatternIDs(pkg)
 		}
@@ -355,22 +360,53 @@ func (s *Service) ListPackagePatterns(ctx context.Context, pkg Package) ([]Banne
 			return out, nil
 		}
 	}
+	if len(fetchedBody) == 0 && pkg.ID != 0 {
+		one, path, data, err := s.fetchPackage(ctx, pkg.ID)
+		fetchedPath, fetchedBody = path, data
+		if err == nil && one.ID != 0 {
+			pkg = one
+		}
+	}
+	if fetchedPath == "" {
+		fetchedPath = fmt.Sprintf("/api/v2/packages/%d.json?fields=id,name,options,format,banner_format_id,pads_tree_id", pkg.ID)
+	}
+	logVKExchange("GET", fetchedPath, "<empty>", 200, string(orBytes(fetchedBody, pkg.Options, pkg.Format)), fmt.Errorf("пакет %d без паттернов", pkg.ID))
+	log.Printf("vkads package %d dump banner_format_id=%d pads_tree_id=%d parsed_ids=%v\noptions: %s\nformat: %s",
+		pkg.ID, pkg.BannerFormatID, pkg.PadsTreeID, ids, orJSON(pkg.Options), orJSON(pkg.Format))
 	return nil, fmt.Errorf("vkads: пакет %d не задаёт паттерны объявлений", pkg.ID)
 }
 
-func (s *Service) fetchPackage(ctx context.Context, id int64) (Package, error) {
-	data, err := s.Get(ctx, fmt.Sprintf("/api/v2/packages/%d.json?fields=id,options,format,banner_format_id", id))
+func orBytes(parts ...[]byte) []byte {
+	for _, p := range parts {
+		if len(bytes.TrimSpace(p)) > 0 {
+			return p
+		}
+	}
+	return nil
+}
+
+func orJSON(raw json.RawMessage) string {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return "<empty>"
+	}
+	return string(raw)
+}
+
+func (s *Service) fetchPackage(ctx context.Context, id int64) (Package, string, []byte, error) {
+	path := fmt.Sprintf("/api/v2/packages/%d.json?fields=id,name,options,format,banner_format_id,pads_tree_id", id)
+	data, err := s.Get(ctx, path)
 	if err != nil {
-		data, err = s.Get(ctx, fmt.Sprintf("/api/v2/packages.json?fields=id,options,format,banner_format_id&_id=%d&limit=1", id))
+		path = fmt.Sprintf("/api/v2/packages.json?fields=id,name,options,format,banner_format_id,pads_tree_id&_id=%d&limit=1", id)
+		data, err = s.Get(ctx, path)
 		if err != nil {
-			return Package{}, err
+			return Package{}, path, nil, err
 		}
 	}
 	pkg := decodePackage(data)
 	if pkg.ID == 0 {
-		return Package{}, fmt.Errorf("vkads: пакет %d не найден", id)
+		return Package{}, path, data, fmt.Errorf("vkads: пакет %d не найден", id)
 	}
-	return pkg, nil
+	return pkg, path, data, nil
 }
 
 func decodePackage(data []byte) Package {

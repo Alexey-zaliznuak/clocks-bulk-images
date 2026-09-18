@@ -2,6 +2,7 @@ package vkads
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -44,6 +45,26 @@ func TestParsePackagePatternIDsFromIDMap(t *testing.T) {
 		if !want[id] {
 			t.Fatalf("unexpected %d in %v", id, got)
 		}
+	}
+}
+
+func TestHTTPErrorIncludesRequestAndResponse(t *testing.T) {
+	err := &HTTPError{
+		StatusCode: 400,
+		Method:     "POST",
+		Path:       "/api/v2/ad_groups.json",
+		Request:    `{"name":"Аркадий"}`,
+		Body:       `{"error":{"code":"validation_failed"}}`,
+	}
+	got := err.Error()
+	if !strings.Contains(got, "request: {\"name\":\"Аркадий\"}") || !strings.Contains(got, "response: {\"error\"") {
+		t.Fatalf("got %s", got)
+	}
+}
+
+func TestRequestLogBodySkipsMultipart(t *testing.T) {
+	if got := requestLogBody([]byte("abc"), "multipart/form-data"); got != "<multipart 3 bytes>" {
+		t.Fatalf("got %s", got)
 	}
 }
 

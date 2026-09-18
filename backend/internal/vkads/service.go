@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -222,7 +223,7 @@ func (s *Service) PostMultipart(ctx context.Context, path, contentType string, b
 			return data, nil
 		}
 		if unauthorized {
-			return nil, &HTTPError{StatusCode: status, Path: path, Body: string(data)}
+			return nil, logAndWrapHTTP(http.MethodPost, path, requestLogBody(body, contentType), status, data)
 		}
 		unauthorized = true
 		s.Invalidate()
@@ -248,7 +249,7 @@ func (s *Service) do(ctx context.Context, method, path string, body []byte) ([]b
 			return data, nil
 		}
 		if unauthorized {
-			return nil, &HTTPError{StatusCode: status, Path: path, Body: string(data)}
+			return nil, logAndWrapHTTP(method, path, requestLogBody(body, "application/json"), status, data)
 		}
 		unauthorized = true
 		s.Invalidate()
@@ -312,14 +313,17 @@ func (s *Service) roundTripTyped(ctx context.Context, method, path string, body 
 	if client == nil {
 		client = s.http
 	}
+	fullURL := s.adsURL + path
+	reqDump := requestLogBody(body, contentType)
 	resp, err := client.Do(req)
 	if err != nil {
+		logVKExchange(method, fullURL, reqDump, 0, "", err)
 		return nil, 0, err
 	}
 	defer resp.Body.Close()
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if resp.StatusCode >= 400 && resp.StatusCode != http.StatusUnauthorized {
-		return nil, resp.StatusCode, &HTTPError{StatusCode: resp.StatusCode, Path: path, Body: string(data)}
+		return nil, resp.StatusCode, logAndWrapHTTP(method, fullURL, reqDump, resp.StatusCode, data)
 	}
 	return data, resp.StatusCode, nil
 }
@@ -327,12 +331,62 @@ func (s *Service) roundTripTyped(ctx context.Context, method, path string, body 
 // HTTPError is a non-2xx response from VK Ads.
 type HTTPError struct {
 	StatusCode int
+	Method     string
 	Path       string
+	Request    string
 	Body       string
 }
 
 func (e *HTTPError) Error() string {
-	return fmt.Sprintf("vkads %s: status %d: %s", e.Path, e.StatusCode, e.Body)
+	var b strings.Builder
+	fmt.Fprintf(&b, "vkads %s %s: status %d", e.Method, e.Path, e.StatusCode)
+	if e.Request != "" {
+		fmt.Fprintf(&b, "\nrequest: %s", e.Request)
+	}
+	if e.Body != "" {
+		fmt.Fprintf(&b, "\nresponse: %s", e.Body)
+	}
+	return b.String()
+}
+
+func requestLogBody(body []byte, contentType string) string {
+	if len(body) == 0 {
+		return ""
+	}
+	if strings.Contains(contentType, "multipart") {
+		return fmt.Sprintf("<multipart %d bytes>", len(body))
+	}
+	return string(body)
+}
+
+func logAndWrapHTTP(method, path, request string, status int, response []byte) *HTTPError {
+	err := &HTTPError{StatusCode: status, Method: method, Path: path, Request: request, Body: string(response)}
+	logVKExchange(method, path, request, status, err.Body, err)
+	return err
+}
+
+func logVKExchange(method, path, request string, status int, response string, err error) {
+	var b strings.Builder
+	fmt.Fprintf(&b, "vkads error %s %s", method, path)
+	if status > 0 {
+		fmt.Fprintf(&b, " status=%d", status)
+	}
+	if err != nil && status == 0 {
+		fmt.Fprintf(&b, " transport=%v", err)
+	}
+	b.WriteString("\nrequest: ")
+	if request == "" {
+		b.WriteString("<empty>")
+	} else {
+		b.WriteString(request)
+	}
+	b.WriteString("\nresponse: ")
+	if response == "" {
+		b.WriteString("<empty>")
+	} else {
+		b.WriteString(response)
+	}
+	log.Print(b.String())
 }
 
 func truncate(b []byte, n int) string {
