@@ -100,7 +100,7 @@ func (s *Service) ListSegments(ctx context.Context) ([]Segment, error) {
 	return all, nil
 }
 
-// FindAudience returns the newest exact-name segment or a permanent miss.
+// FindAudience returns the name or «Аудитория {name}» segment, or a permanent miss.
 func (s *Service) FindAudience(ctx context.Context, name string) (*Segment, error) {
 	items, err := s.ListSegments(ctx)
 	if err != nil {

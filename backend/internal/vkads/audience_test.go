@@ -21,14 +21,33 @@ func TestMatchAudienceExactCaseInsensitive(t *testing.T) {
 	if MatchAudience(" Иван ", items) == nil || MatchAudience(" Иван ", items).ID != 2 {
 		t.Fatal("spaces around the name should still be an exact match")
 	}
-	if MatchAudience("Аудитория Гущинов", []Segment{{ID: 9, Name: "гущин"}}) != nil {
-		t.Fatal("substring must not match")
-	}
-	if MatchAudience("Гущин", []Segment{{ID: 9, Name: "Аудитория Гущинов"}}) != nil {
-		t.Fatal("Аудитория Гущинов is not an exact Гущин")
-	}
 	if MatchAudience("Пётр", items) != nil {
 		t.Fatal("missing name must not match")
+	}
+}
+
+func TestMatchAudiencePrefersExactThenAudiencePrefix(t *testing.T) {
+	older := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	newer := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
+	both := []Segment{
+		{ID: 1, Name: "Аудитория Аркадий", Created: newer},
+		{ID: 2, Name: "аркадий", Created: older},
+	}
+	got := MatchAudience("Аркадий", both)
+	if got == nil || got.ID != 2 {
+		t.Fatalf("exact name must win, got %#v", got)
+	}
+	onlyPrefixed := []Segment{
+		{ID: 3, Name: "аудитория аркадий", Created: older},
+		{ID: 4, Name: "Аудитория Аркадий", Created: newer},
+		{ID: 5, Name: "Аудитория Гущинов"},
+	}
+	got = MatchAudience("Аркадий", onlyPrefixed)
+	if got == nil || got.ID != 4 {
+		t.Fatalf("fallback Аудитория Аркадий = %#v", got)
+	}
+	if MatchAudience("Гущин", onlyPrefixed) != nil {
+		t.Fatal("Аудитория Гущинов is not Аудитория Гущин")
 	}
 }
 
