@@ -10,16 +10,17 @@ import (
 
 // Task status state machine.
 const (
-	StatusQueued           = "queued"            // created, waiting for a worker
-	StatusImageCreating    = "image_creating"    // sending order to Imanator
-	StatusImagePolling     = "image_polling"     // waiting for Imanator to render
-	StatusImageReady       = "image_ready"       // image URL obtained
-	StatusVideoCreating    = "video_creating"    // sending job to OpenRouter
-	StatusVideoPolling     = "video_polling"     // waiting for OpenRouter to render
-	StatusVideoDownloading = "video_downloading" // downloading + uploading to S3
-	StatusAudioMixing      = "audio_mixing"      // stretching the clip onto the soundtrack
-	StatusDone             = "done"              // finished, video in MinIO
-	StatusFailed           = "failed"            // errored out
+	StatusAudienceSearching = "audience_searching" // looking up the VK Ads audience
+	StatusQueued            = "queued"             // created, waiting for a worker
+	StatusImageCreating     = "image_creating"     // sending order to Imanator
+	StatusImagePolling      = "image_polling"      // waiting for Imanator to render
+	StatusImageReady        = "image_ready"        // image URL obtained
+	StatusVideoCreating     = "video_creating"     // sending job to OpenRouter
+	StatusVideoPolling      = "video_polling"      // waiting for OpenRouter to render
+	StatusVideoDownloading  = "video_downloading"  // downloading + uploading to S3
+	StatusAudioMixing       = "audio_mixing"       // stretching the clip onto the soundtrack
+	StatusDone              = "done"               // finished, video in MinIO
+	StatusFailed            = "failed"             // errored out
 )
 
 // IsTerminal reports whether a status will never change again on its own.
@@ -45,8 +46,8 @@ type Batch struct {
 }
 
 type Task struct {
-	ID       string `json:"id"`
-	BatchID  string `json:"batchId"`
+	ID        string `json:"id"`
+	BatchID   string `json:"batchId"`
 	FirstName string `json:"firstName"`
 	LastName  string `json:"lastName"`
 

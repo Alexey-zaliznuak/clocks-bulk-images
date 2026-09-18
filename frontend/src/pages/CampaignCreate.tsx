@@ -10,8 +10,10 @@ import {
 import ConfirmDialog from "../components/ConfirmDialog";
 import { formatDuration } from "../format";
 import { DEFAULT_VIDEO_MODEL } from "../settings";
+import { defaultVKSettings, parseOptionalNumber, parsePadList, type VKSettings } from "../vkSettings";
 
-type Tab = "names" | "surnames";
+type ListTab = "names" | "surnames";
+type SettingsTab = "campaign" | "group" | "ads" | "generation";
 
 interface CampaignFormSettings {
   templateId: string;
@@ -60,7 +62,9 @@ function loadCampaignSettings(): CampaignFormSettings {
 export default function CampaignCreate() {
   const navigate = useNavigate();
   const [title, setTitle] = useState("");
-  const [activeTab, setActiveTab] = useState<Tab>("names");
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("campaign");
+  const [listTab, setListTab] = useState<ListTab>("names");
+  const [adsListTab, setAdsListTab] = useState<ListTab>("names");
   const [namesText, setNamesText] = useState("");
   const [surnamesText, setSurnamesText] = useState("");
   const [nameTextTemplate, setNameTextTemplate] = useState("");
@@ -81,6 +85,9 @@ export default function CampaignCreate() {
   const [audioWarnOpen, setAudioWarnOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [vkSettings, setVkSettings] = useState<VKSettings>(defaultVKSettings);
+  const [vkConfigured, setVkConfigured] = useState(true);
+  const [padText, setPadText] = useState("");
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
@@ -97,17 +104,25 @@ export default function CampaignCreate() {
         setSurnameTextTemplate(res.surnameTextTemplate);
         setDefaultNameDiagnostics(res.diagnostics.names);
         setDefaultSurnameDiagnostics(res.diagnostics.surnames);
+        if (res.vkSettings) {
+          const next = { ...defaultVKSettings(), ...res.vkSettings };
+          setVkSettings(next);
+          setPadText((next.pads || []).join(", "));
+        }
       })
       .catch((e) => setDefaultsError(e instanceof Error ? e.message : "Не удалось загрузить списки"))
       .finally(() => setLoadingDefaults(false));
 
     api.config()
-      .then((cfg) => setSettings((s) => ({
-        ...s,
-        videoModel: s.videoModel || cfg.defaultModel,
-        videoPrompt: s.videoPrompt || cfg.defaultPrompt,
-        videoDuration: s.videoDuration || String(cfg.defaultDuration || ""),
-      })))
+      .then((cfg) => {
+        setVkConfigured(Boolean(cfg.vkAds?.configured));
+        setSettings((s) => ({
+          ...s,
+          videoModel: s.videoModel || cfg.defaultModel,
+          videoPrompt: s.videoPrompt || cfg.defaultPrompt,
+          videoDuration: s.videoDuration || String(cfg.defaultDuration || ""),
+        }));
+      })
       .catch(() => {});
     api.models()
       .then((res) => {
@@ -147,7 +162,7 @@ export default function CampaignCreate() {
     setSettings((current) => ({ ...current, [key]: value }));
   }
 
-  async function loadFile(file: File, tab: Tab) {
+  async function loadFile(file: File, tab: ListTab) {
     if (!file.name.toLocaleLowerCase().endsWith(".txt")) {
       setError("Выберите текстовый файл .txt");
       return;
@@ -162,13 +177,13 @@ export default function CampaignCreate() {
     }
   }
 
-  function onDrop(event: DragEvent<HTMLLabelElement>, tab: Tab) {
+  function onDrop(event: DragEvent<HTMLLabelElement>, tab: ListTab) {
     event.preventDefault();
     const file = event.dataTransfer.files[0];
     if (file) void loadFile(file, tab);
   }
 
-  function restore(tab: Tab) {
+  function restore(tab: ListTab) {
     if (tab === "names") {
       setNamesText(defaultNames.join("\n"));
       setNameSource("Дефолтный список");
@@ -226,6 +241,13 @@ export default function CampaignCreate() {
         videoAspectRatio: settings.videoAspectRatio,
         generateAudio: settings.generateAudio,
         audioAssetId: settings.generateAudio ? "" : settings.audioAssetId,
+        vkSettings: {
+          ...vkSettings,
+          pads: parsePadList(padText),
+          budgetDay: vkSettings.budgetDay,
+          budgetTotal: vkSettings.budgetTotal,
+          maxPrice: vkSettings.maxPrice,
+        },
       });
       navigate(`/campaigns/${result.campaign.id}`);
     } catch (e) {
@@ -238,7 +260,7 @@ export default function CampaignCreate() {
   if (loadingDefaults) return <p className="text-sm text-slate-500">Загрузка списков…</p>;
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5">
+    <div className="mx-auto max-w-4xl space-y-5">
       <div>
         <Link to="/campaigns" className="text-sm text-slate-500 hover:text-blue-600">
           ← К кампаниям
@@ -250,125 +272,319 @@ export default function CampaignCreate() {
       </div>
 
       {defaultsError && <Alert>{defaultsError}</Alert>}
-
-      <Field label="Название кампании">
-        <input className={inputCls} value={title} onChange={(e) => setTitle(e.target.value)} required />
-      </Field>
+      {!vkConfigured && (
+        <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          Кабинет ZaleyCash / VK Ads не настроен. Черновик сохранить можно, запуск потребует ZALEY_SECRET и ZALEY_ACCOUNT_NAME.
+        </p>
+      )}
 
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex overflow-x-auto border-b border-slate-200" role="tablist" aria-label="Тип списка">
-          <TabButton active={activeTab === "names"} onClick={() => setActiveTab("names")}>
-            Имена ({names.values.length})
-          </TabButton>
-          <TabButton active={activeTab === "surnames"} onClick={() => setActiveTab("surnames")}>
-            Фамилии ({surnames.values.length})
-          </TabButton>
+        <div className="flex overflow-x-auto border-b border-slate-200" role="tablist" aria-label="Разделы настроек">
+          <TabButton active={settingsTab === "campaign"} onClick={() => setSettingsTab("campaign")}>Настройки кампании</TabButton>
+          <TabButton active={settingsTab === "group"} onClick={() => setSettingsTab("group")}>Группа</TabButton>
+          <TabButton active={settingsTab === "ads"} onClick={() => setSettingsTab("ads")}>Объявления</TabButton>
+          <TabButton active={settingsTab === "generation"} onClick={() => setSettingsTab("generation")}>Генерация</TabButton>
         </div>
         <div className="space-y-4 p-4">
-          {activeTab === "names" ? (
-            <ListEditor
-              label="Рекламный текст для имён"
-              template={nameTextTemplate}
-              onTemplateChange={setNameTextTemplate}
-              text={namesText}
-              onTextChange={(value) => {
-                setNamesText(value);
-                setNameSource("Введено вручную");
-              }}
-              normalized={displayedNames}
-              source={nameSource}
-              example={names.values[0] || "Анна"}
-              onFile={(file) => void loadFile(file, "names")}
-              onDrop={(event) => onDrop(event, "names")}
-              onRestore={() => restore("names")}
-            />
-          ) : (
-            <ListEditor
-              label="Рекламный текст для фамилий"
-              template={surnameTextTemplate}
-              onTemplateChange={setSurnameTextTemplate}
-              text={surnamesText}
-              onTextChange={(value) => {
-                setSurnamesText(value);
-                setSurnameSource("Введено вручную");
-              }}
-              normalized={displayedSurnames}
-              source={surnameSource}
-              example={surnames.values[0] || "Иванова"}
-              onFile={(file) => void loadFile(file, "surnames")}
-              onDrop={(event) => onDrop(event, "surnames")}
-              onRestore={() => restore("surnames")}
-            />
+          {settingsTab === "campaign" && (
+            <>
+              <Field label="Название кампании">
+                <input className={inputCls} value={title} onChange={(e) => setTitle(e.target.value)} required />
+              </Field>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="ID сообщества">
+                  <input
+                    className={inputCls}
+                    type="number"
+                    value={vkSettings.communityId}
+                    onChange={(e) => setVkSettings((s) => ({ ...s, communityId: Number(e.target.value) || 0 }))}
+                  />
+                </Field>
+                <Field label="Целевое действие">
+                  <select
+                    className={inputCls}
+                    value={vkSettings.targetAction}
+                    onChange={(e) => setVkSettings((s) => ({ ...s, targetAction: e.target.value }))}
+                  >
+                    <option value="send_message">Отправка сообщения</option>
+                  </select>
+                </Field>
+              </div>
+              <label className="flex cursor-pointer items-start gap-2.5">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4"
+                  checked={vkSettings.optimization}
+                  onChange={(e) => setVkSettings((s) => ({ ...s, optimization: e.target.checked }))}
+                />
+                <span className="text-sm text-slate-700">Оптимизация бюджета включена</span>
+              </label>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Стратегия ставок">
+                  <select
+                    className={inputCls}
+                    value={vkSettings.biddingStrategy}
+                    onChange={(e) => setVkSettings((s) => ({ ...s, biddingStrategy: e.target.value }))}
+                  >
+                    <option value="min_price">Минимальная цена</option>
+                    <option value="max_goals">Максимум конверсий</option>
+                    <option value="second_price_mean">Средняя цена</option>
+                  </select>
+                </Field>
+                <Field label="Дневной бюджет, ₽">
+                  <input
+                    className={inputCls}
+                    value={vkSettings.budgetDay ?? ""}
+                    onChange={(e) => setVkSettings((s) => ({ ...s, budgetDay: parseOptionalNumber(e.target.value) }))}
+                  />
+                </Field>
+                <Field label="Общий бюджет, ₽">
+                  <input
+                    className={inputCls}
+                    value={vkSettings.budgetTotal ?? ""}
+                    placeholder="не задан"
+                    onChange={(e) => setVkSettings((s) => ({ ...s, budgetTotal: parseOptionalNumber(e.target.value) }))}
+                  />
+                </Field>
+                <Field label="Ограничение ставки, ₽">
+                  <input
+                    className={inputCls}
+                    value={vkSettings.maxPrice ?? ""}
+                    placeholder="не задано"
+                    onChange={(e) => setVkSettings((s) => ({ ...s, maxPrice: parseOptionalNumber(e.target.value) }))}
+                  />
+                </Field>
+              </div>
+              <Field label="REF-метки">
+                <input
+                  className={inputCls}
+                  value={vkSettings.refTags}
+                  onChange={(e) => setVkSettings((s) => ({ ...s, refTags: e.target.value }))}
+                />
+              </Field>
+              <p className="text-xs text-slate-500">Дата показа — с даты создания кампании, без даты окончания.</p>
+              <hr className="border-slate-200" />
+              <div className="flex overflow-x-auto border-b border-slate-200" role="tablist" aria-label="Списки">
+                <TabButton active={listTab === "names"} onClick={() => setListTab("names")}>
+                  Имена ({names.values.length})
+                </TabButton>
+                <TabButton active={listTab === "surnames"} onClick={() => setListTab("surnames")}>
+                  Фамилии ({surnames.values.length})
+                </TabButton>
+              </div>
+              {listTab === "names" ? (
+                <ListOnlyEditor
+                  text={namesText}
+                  onTextChange={(value) => {
+                    setNamesText(value);
+                    setNameSource("Введено вручную");
+                  }}
+                  normalized={displayedNames}
+                  source={nameSource}
+                  onFile={(file) => void loadFile(file, "names")}
+                  onDrop={(event) => onDrop(event, "names")}
+                  onRestore={() => restore("names")}
+                />
+              ) : (
+                <ListOnlyEditor
+                  text={surnamesText}
+                  onTextChange={(value) => {
+                    setSurnamesText(value);
+                    setSurnameSource("Введено вручную");
+                  }}
+                  normalized={displayedSurnames}
+                  source={surnameSource}
+                  onFile={(file) => void loadFile(file, "surnames")}
+                  onDrop={(event) => onDrop(event, "surnames")}
+                  onRestore={() => restore("surnames")}
+                />
+              )}
+            </>
           )}
-        </div>
-      </section>
 
-      <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <h2 className="font-semibold text-slate-900">Общие настройки</h2>
-        <Field label="ID шаблона Иманатора">
-          <input className={inputCls} value={settings.templateId} onChange={(e) => update("templateId", e.target.value)} />
-        </Field>
-        <Field label="Ключ подстановки имени">
-          <input className={inputCls} value={settings.nameSettingKey} onChange={(e) => update("nameSettingKey", e.target.value)} />
-        </Field>
-        <Field label="Доп. настройки изображения (JSON)">
-          <textarea className={`${inputCls} min-h-20 font-mono text-sm`} value={settings.imageSettingsText} onChange={(e) => update("imageSettingsText", e.target.value)} />
-        </Field>
-        <hr className="border-slate-200" />
-        <Field label="Модель видео (OpenRouter)">
-          {modelsError ? (
-            <input className={inputCls} value={settings.videoModel} onChange={(e) => update("videoModel", e.target.value)} />
-          ) : (
-            <select className={inputCls} value={settings.videoModel} onChange={(e) => update("videoModel", e.target.value)}>
-              {models.length === 0 && <option value={settings.videoModel}>{settings.videoModel || "Загрузка…"}</option>}
-              {models.map((model) => <option key={model.id} value={model.id}>{model.name} ({model.id})</option>)}
-            </select>
+          {settingsTab === "group" && (
+            <>
+              <p className="text-sm text-slate-500">
+                Эти настройки клонируются во все группы ВКР. На каждое имя и фамилию будет своя группа.
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Пол">
+                  <select
+                    className={inputCls}
+                    value={vkSettings.sex}
+                    onChange={(e) => setVkSettings((s) => ({ ...s, sex: e.target.value as VKSettings["sex"] }))}
+                  >
+                    <option value="male">Мужской</option>
+                    <option value="female">Женский</option>
+                    <option value="all">Все</option>
+                  </select>
+                </Field>
+                <Field label="Маркировка">
+                  <select
+                    className={inputCls}
+                    value={vkSettings.ageRestrictions}
+                    onChange={(e) => setVkSettings((s) => ({ ...s, ageRestrictions: e.target.value }))}
+                  >
+                    {["0+", "6+", "12+", "16+", "18+"].map((mark) => (
+                      <option key={mark} value={mark}>{mark}</option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Возраст от">
+                  <input
+                    className={inputCls}
+                    type="number"
+                    min={12}
+                    max={75}
+                    value={vkSettings.ageFrom}
+                    onChange={(e) => setVkSettings((s) => ({ ...s, ageFrom: Number(e.target.value) || 0 }))}
+                  />
+                </Field>
+                <Field label="Возраст до">
+                  <input
+                    className={inputCls}
+                    type="number"
+                    min={12}
+                    max={75}
+                    value={vkSettings.ageTo}
+                    onChange={(e) => setVkSettings((s) => ({ ...s, ageTo: Number(e.target.value) || 0 }))}
+                  />
+                </Field>
+              </div>
+              <label className="flex cursor-pointer items-start gap-2.5">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4"
+                  checked={vkSettings.ageUnknown}
+                  onChange={(e) => setVkSettings((s) => ({ ...s, ageUnknown: e.target.checked }))}
+                />
+                <span className="text-sm text-slate-700">Включать возраст «не определён»</span>
+              </label>
+              <Field label="Места размещения (id через запятую, пусто = лента ВК)">
+                <input
+                  className={inputCls}
+                  value={padText}
+                  placeholder="по умолчанию только лента ВК"
+                  onChange={(e) => setPadText(e.target.value)}
+                />
+              </Field>
+              <p className="text-xs text-slate-500">
+                Время 6–21, регион Россия, расширение аудитории выключено — эти поля не настраиваются.
+              </p>
+            </>
           )}
-          {modelsError && <p className="mt-1 text-xs text-amber-700">{modelsError}. Введите модель вручную.</p>}
-        </Field>
-        <Field label="Промпт для видео">
-          <textarea className={`${inputCls} min-h-28`} value={settings.videoPrompt} onChange={(e) => update("videoPrompt", e.target.value)} />
-        </Field>
-        <div className="grid gap-3 sm:grid-cols-3">
-          <Field label="Длительность (сек)">
-            <SelectOrInput value={settings.videoDuration} options={selectedModel?.supported_durations?.map(String)} onChange={(value) => update("videoDuration", value)} />
-          </Field>
-          <Field label="Разрешение">
-            <SelectOrInput value={settings.videoResolution} options={selectedModel?.supported_resolutions} onChange={(value) => update("videoResolution", value)} />
-          </Field>
-          <Field label="Соотношение">
-            <SelectOrInput value={settings.videoAspectRatio} options={selectedModel?.supported_aspect_ratios} onChange={(value) => update("videoAspectRatio", value)} />
-          </Field>
+
+          {settingsTab === "ads" && (
+            <>
+              <Field label="Заголовок объявления">
+                <input
+                  className={inputCls}
+                  value={vkSettings.bannerTitle}
+                  onChange={(e) => setVkSettings((s) => ({ ...s, bannerTitle: e.target.value }))}
+                />
+              </Field>
+              <Field label="Надпись на кнопке">
+                <input
+                  className={inputCls}
+                  value={vkSettings.bannerCta}
+                  onChange={(e) => setVkSettings((s) => ({ ...s, bannerCta: e.target.value }))}
+                />
+              </Field>
+              <div className="flex overflow-x-auto border-b border-slate-200" role="tablist" aria-label="Описание объявления">
+                <TabButton active={adsListTab === "names"} onClick={() => setAdsListTab("names")}>
+                  Описание для имён
+                </TabButton>
+                <TabButton active={adsListTab === "surnames"} onClick={() => setAdsListTab("surnames")}>
+                  Описание для фамилий
+                </TabButton>
+              </div>
+              {adsListTab === "names" ? (
+                <DescriptionEditor
+                  template={nameTextTemplate}
+                  onTemplateChange={setNameTextTemplate}
+                  example={names.values[0] || "Анна"}
+                  required={names.values.length > 0}
+                />
+              ) : (
+                <DescriptionEditor
+                  template={surnameTextTemplate}
+                  onTemplateChange={setSurnameTextTemplate}
+                  example={surnames.values[0] || "Иванова"}
+                  required={surnames.values.length > 0}
+                />
+              )}
+            </>
+          )}
+
+          {settingsTab === "generation" && (
+            <>
+              <Field label="ID шаблона Иманатора">
+                <input className={inputCls} value={settings.templateId} onChange={(e) => update("templateId", e.target.value)} />
+              </Field>
+              <Field label="Ключ подстановки имени">
+                <input className={inputCls} value={settings.nameSettingKey} onChange={(e) => update("nameSettingKey", e.target.value)} />
+              </Field>
+              <Field label="Доп. настройки изображения (JSON)">
+                <textarea className={`${inputCls} min-h-20 font-mono text-sm`} value={settings.imageSettingsText} onChange={(e) => update("imageSettingsText", e.target.value)} />
+              </Field>
+              <hr className="border-slate-200" />
+              <Field label="Модель видео (OpenRouter)">
+                {modelsError ? (
+                  <input className={inputCls} value={settings.videoModel} onChange={(e) => update("videoModel", e.target.value)} />
+                ) : (
+                  <select className={inputCls} value={settings.videoModel} onChange={(e) => update("videoModel", e.target.value)}>
+                    {models.length === 0 && <option value={settings.videoModel}>{settings.videoModel || "Загрузка…"}</option>}
+                    {models.map((model) => <option key={model.id} value={model.id}>{model.name} ({model.id})</option>)}
+                  </select>
+                )}
+                {modelsError && <p className="mt-1 text-xs text-amber-700">{modelsError}. Введите модель вручную.</p>}
+              </Field>
+              <Field label="Промпт для видео">
+                <textarea className={`${inputCls} min-h-28`} value={settings.videoPrompt} onChange={(e) => update("videoPrompt", e.target.value)} />
+              </Field>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <Field label="Длительность (сек)">
+                  <SelectOrInput value={settings.videoDuration} options={selectedModel?.supported_durations?.map(String)} onChange={(value) => update("videoDuration", value)} />
+                </Field>
+                <Field label="Разрешение">
+                  <SelectOrInput value={settings.videoResolution} options={selectedModel?.supported_resolutions} onChange={(value) => update("videoResolution", value)} />
+                </Field>
+                <Field label="Соотношение">
+                  <SelectOrInput value={settings.videoAspectRatio} options={selectedModel?.supported_aspect_ratios} onChange={(value) => update("videoAspectRatio", value)} />
+                </Field>
+              </div>
+              <hr className="border-slate-200" />
+              <Field label="Музыка (mp3 из медиатеки)">
+                <select className={inputCls} value={settings.audioAssetId} onChange={(e) => update("audioAssetId", e.target.value)} disabled={settings.generateAudio}>
+                  <option value="">— не выбрано —</option>
+                  {audio.map((asset) => (
+                    <option key={asset.id} value={asset.id}>
+                      {asset.title || asset.filename} ({formatDuration(asset.durationSeconds)})
+                    </option>
+                  ))}
+                </select>
+                {audioError && <p className="mt-1 text-xs text-amber-700">{audioError}</p>}
+                {!audioError && audio.length === 0 && (
+                  <p className="mt-1 text-xs text-amber-700">
+                    Медиатека пуста — <Link to="/media" className="text-blue-600 hover:underline">загрузите mp3</Link>.
+                  </p>
+                )}
+              </Field>
+              <label className="flex cursor-pointer items-start gap-2.5">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4"
+                  checked={settings.generateAudio}
+                  onChange={(e) => e.target.checked ? setAudioWarnOpen(true) : update("generateAudio", false)}
+                />
+                <span className="text-sm text-slate-700">
+                  Генерировать аудио моделью
+                  <span className="block text-xs text-slate-500">Существенно дороже, музыка из медиатеки не накладывается.</span>
+                </span>
+              </label>
+            </>
+          )}
         </div>
-        <hr className="border-slate-200" />
-        <Field label="Музыка (mp3 из медиатеки)">
-          <select className={inputCls} value={settings.audioAssetId} onChange={(e) => update("audioAssetId", e.target.value)} disabled={settings.generateAudio}>
-            <option value="">— не выбрано —</option>
-            {audio.map((asset) => (
-              <option key={asset.id} value={asset.id}>
-                {asset.title || asset.filename} ({formatDuration(asset.durationSeconds)})
-              </option>
-            ))}
-          </select>
-          {audioError && <p className="mt-1 text-xs text-amber-700">{audioError}</p>}
-          {!audioError && audio.length === 0 && (
-            <p className="mt-1 text-xs text-amber-700">
-              Медиатека пуста — <Link to="/media" className="text-blue-600 hover:underline">загрузите mp3</Link>.
-            </p>
-          )}
-        </Field>
-        <label className="flex cursor-pointer items-start gap-2.5">
-          <input
-            type="checkbox"
-            className="mt-0.5 h-4 w-4"
-            checked={settings.generateAudio}
-            onChange={(e) => e.target.checked ? setAudioWarnOpen(true) : update("generateAudio", false)}
-          />
-          <span className="text-sm text-slate-700">
-            Генерировать аудио моделью
-            <span className="block text-xs text-slate-500">Существенно дороже, музыка из медиатеки не накладывается.</span>
-          </span>
-        </label>
       </section>
 
       {error && <Alert>{error}</Alert>}
@@ -397,42 +613,25 @@ export default function CampaignCreate() {
   );
 }
 
-function ListEditor({
-  label,
-  template,
-  onTemplateChange,
+function ListOnlyEditor({
   text,
   onTextChange,
   normalized,
   source,
-  example,
   onFile,
   onDrop,
   onRestore,
 }: {
-  label: string;
-  template: string;
-  onTemplateChange: (value: string) => void;
   text: string;
   onTextChange: (value: string) => void;
   normalized: NormalizedList;
   source: string;
-  example: string;
   onFile: (file: File) => void;
   onDrop: (event: DragEvent<HTMLLabelElement>) => void;
   onRestore: () => void;
 }) {
   return (
     <>
-      <Field label={`${label} (используйте {{name}})`}>
-        <textarea className={`${inputCls} min-h-24`} value={template} onChange={(e) => onTemplateChange(e.target.value)} />
-        <p className="mt-1 text-xs text-slate-500">
-          Пример: {applyNamePreview(template, example)}
-        </p>
-        {normalized.values.length > 0 && !hasNamePlaceholder(template) && (
-          <p className="mt-1 text-xs text-red-600">Добавьте {"{{name}}"} в текст.</p>
-        )}
-      </Field>
       <label
         className="block cursor-pointer rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-center transition hover:border-blue-400 hover:bg-blue-50"
         onDragOver={(event) => event.preventDefault()}
@@ -452,6 +651,32 @@ function ListEditor({
         <textarea className={`${inputCls} min-h-48 font-mono text-sm`} value={text} onChange={(e) => onTextChange(e.target.value)} />
       </Field>
       <Diagnostics normalized={normalized} />
+    </>
+  );
+}
+
+function DescriptionEditor({
+  template,
+  onTemplateChange,
+  example,
+  required,
+}: {
+  template: string;
+  onTemplateChange: (value: string) => void;
+  example: string;
+  required: boolean;
+}) {
+  return (
+    <>
+      <Field label="Описание (используйте {{name}})">
+        <textarea className={`${inputCls} min-h-40`} value={template} onChange={(e) => onTemplateChange(e.target.value)} />
+        <p className="mt-1 text-xs text-slate-500">
+          Пример: {applyNamePreview(template, example)}
+        </p>
+        {required && !hasNamePlaceholder(template) && (
+          <p className="mt-1 text-xs text-red-600">Добавьте {"{{name}}"} в текст.</p>
+        )}
+      </Field>
     </>
   );
 }

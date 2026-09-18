@@ -73,6 +73,16 @@ type Config struct {
 	// UsdRubRate is the fallback USD→RUB rate used when the live feed is
 	// unavailable. A live rate is still preferred when reachable.
 	UsdRubRate float64
+
+	// ZaleySecret is the API key from ZaleyCash settings. Empty disables VK Ads.
+	ZaleySecret string
+	// ZaleyAccountName is the cabinet title passed as account_id to
+	// POST /api/v2/vk_advert/token (the name, not the numeric id).
+	ZaleyAccountName string
+	ZaleyBaseURL     string
+	VKAdsBaseURL     string
+	// ZaleyTokenRefreshSkew is how early a cached token is treated as expired.
+	ZaleyTokenRefreshSkew time.Duration
 }
 
 // Load reads configuration from the environment, applying sensible defaults.
@@ -119,6 +129,12 @@ func Load() *Config {
 		MediaMaxVideoUploadMB: int64(envInt("MEDIA_MAX_VIDEO_UPLOAD_MB", 500)),
 
 		UsdRubRate: envFloat("USD_RUB_RATE", 85),
+
+		ZaleySecret:           env("ZALEY_SECRET", ""),
+		ZaleyAccountName:      env("ZALEY_ACCOUNT_NAME", ""),
+		ZaleyBaseURL:          env("ZALEY_BASE_URL", "https://zaleycash.com"),
+		VKAdsBaseURL:          env("VK_ADS_BASE_URL", "https://ads.vk.com"),
+		ZaleyTokenRefreshSkew: time.Duration(envInt("ZALEY_TOKEN_REFRESH_SKEW_SECONDS", 120)) * time.Second,
 	}
 	return c
 }

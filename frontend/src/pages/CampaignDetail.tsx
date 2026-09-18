@@ -66,7 +66,7 @@ export default function CampaignDetail() {
   }, [loadCampaign, loadItems]);
 
   useEffect(() => {
-    if (campaign?.lifecycle !== "running") return;
+    if (campaign?.lifecycle !== "running" && campaign?.lifecycle !== "uploading") return;
     const timer = window.setInterval(() => {
       void loadCampaign();
       void loadItems();
@@ -167,6 +167,15 @@ export default function CampaignDetail() {
       {error && <ErrorBox>{error}</ErrorBox>}
       {message && <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</div>}
 
+      {campaign.lifecycle === "uploading" && (
+        <section className="rounded-2xl border border-violet-200 bg-violet-50 p-5">
+          <h2 className="font-semibold text-violet-900">Загрузка в VK Рекламу</h2>
+          <p className="mt-1 text-sm text-violet-800">
+            Создаём кампанию и группы. Объявления с видео в этом шаге не создаются.
+          </p>
+        </section>
+      )}
+
       {campaign.lifecycle === "draft" && (
         <section className="rounded-2xl border border-amber-300 bg-amber-50 p-5">
           <h2 className="font-semibold text-amber-900">Черновик готов к проверке</h2>
@@ -195,8 +204,10 @@ export default function CampaignDetail() {
           Параметры кампании — только просмотр
         </summary>
         <div className="grid gap-4 border-t border-slate-100 p-4 md:grid-cols-2">
-          <ReadField label="Рекламный текст для имён" value={campaign.nameTextTemplate} multiline />
-          <ReadField label="Рекламный текст для фамилий" value={campaign.surnameTextTemplate} multiline />
+          <ReadField label="Заголовок объявления" value={campaign.vkSettings?.bannerTitle || "—"} />
+          <ReadField label="Надпись на кнопке" value={campaign.vkSettings?.bannerCta || "—"} />
+          <ReadField label="Описание для имён" value={campaign.nameTextTemplate} multiline />
+          <ReadField label="Описание для фамилий" value={campaign.surnameTextTemplate} multiline />
           <ReadField label="ID шаблона Иманатора" value={campaign.templateId} />
           <ReadField label="Ключ подстановки" value={campaign.nameSettingKey} />
           <ReadField label="Модель видео" value={campaign.videoModel} />
@@ -205,6 +216,23 @@ export default function CampaignDetail() {
           <ReadField label="Разрешение / соотношение" value={`${campaign.videoResolution || "авто"} / ${campaign.videoAspectRatio || "авто"}`} />
           <ReadField label="Звук" value={campaign.generateAudio ? "Генерируется моделью" : `Медиа: ${campaign.audioAssetId || "—"}`} />
           <ReadField label="Настройки изображения" value={JSON.stringify(campaign.imageSettings, null, 2)} multiline />
+          <ReadField label="ID кампании ВКР" value={campaign.vkAdPlanId || "ещё не создана"} />
+          <ReadField
+            label="Сообщество / действие"
+            value={`${campaign.vkSettings?.communityId ?? "—"} / ${campaign.vkSettings?.targetAction === "send_message" ? "Отправка сообщения" : campaign.vkSettings?.targetAction || "—"}`}
+          />
+          <ReadField
+            label="Бюджет"
+            value={`день ${campaign.vkSettings?.budgetDay ?? "—"} ₽, всего ${campaign.vkSettings?.budgetTotal ?? "не задан"}, стратегия ${campaign.vkSettings?.biddingStrategy || "—"}`}
+          />
+          <ReadField
+            label="Демография"
+            value={`${campaign.vkSettings?.sex === "female" ? "женский" : campaign.vkSettings?.sex === "all" ? "все" : "мужской"}, ${campaign.vkSettings?.ageFrom ?? 24}–${campaign.vkSettings?.ageTo ?? 65}, ${campaign.vkSettings?.ageRestrictions || "0+"}`}
+          />
+          <ReadField label="REF-метки" value={campaign.vkSettings?.refTags || "—"} />
+          {campaign.vkUploadError && (
+            <ReadField label="Ошибка загрузки в ВКР" value={campaign.vkUploadError} multiline />
+          )}
         </div>
       </details>
 
@@ -246,6 +274,8 @@ export default function CampaignDetail() {
                 <tr>
                   <th className={thCls}>Элемент</th>
                   <th className={thCls}>Статус</th>
+                  <th className={thCls}>Аудитория</th>
+                  <th className={thCls}>Группа ВКР</th>
                   <th className={thCls}>Картинка</th>
                   <th className={thCls}>Исходное видео</th>
                   <th className={thCls}>Преобразованное видео</th>
@@ -276,6 +306,10 @@ export default function CampaignDetail() {
                         </button>
                       )}
                     </td>
+                    <td className="px-4 py-3 text-xs text-slate-600">
+                      {item.audienceName || (item.audienceId ? String(item.audienceId) : "—")}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-slate-600">{item.vkAdGroupId || "—"}</td>
                     <DownloadCell url={item.imageDownloadUrl} label="Скачать картинку" />
                     <DownloadCell url={item.sourceDownloadUrl} label="Скачать исходное видео" />
                     <DownloadCell url={item.videoDownloadUrl} label="Скачать преобразованное видео" />

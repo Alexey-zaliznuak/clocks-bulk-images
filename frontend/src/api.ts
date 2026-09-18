@@ -201,6 +201,9 @@ export interface AdCampaign {
   failed: number;
   costUsd: number;
   costRub: number;
+  vkSettings?: import("./vkSettings").VKSettings;
+  vkAdPlanId?: string;
+  vkUploadError?: string;
 }
 
 export interface AdCampaignItem {
@@ -216,6 +219,9 @@ export interface AdCampaignItem {
   imageDownloadUrl?: string;
   sourceDownloadUrl?: string;
   videoDownloadUrl?: string;
+  audienceId?: number;
+  audienceName?: string;
+  vkAdGroupId?: string;
 }
 
 export interface CreateAdCampaignPayload {
@@ -234,6 +240,7 @@ export interface CreateAdCampaignPayload {
   videoAspectRatio: string;
   generateAudio: boolean;
   audioAssetId: string;
+  vkSettings: import("./vkSettings").VKSettings;
 }
 
 // ---------- endpoints ----------
@@ -246,9 +253,12 @@ export const api = {
     }),
 
   config: () =>
-    request<{ defaultModel: string; defaultDuration: number; defaultPrompt: string }>(
-      "/api/config"
-    ),
+    request<{
+      defaultModel: string;
+      defaultDuration: number;
+      defaultPrompt: string;
+      vkAds?: { configured: boolean; accountName?: string };
+    }>("/api/config"),
 
   models: () => request<{ models: VideoModel[]; defaultModel: string }>("/api/models"),
 
@@ -292,6 +302,7 @@ export const api = {
       nameTextTemplate: string;
       surnameTextTemplate: string;
       diagnostics: { names: CampaignDiagnostics; surnames: CampaignDiagnostics };
+      vkSettings: import("./vkSettings").VKSettings;
     }>("/api/ad-campaigns/defaults"),
 
   createAdCampaign: (payload: CreateAdCampaignPayload) =>

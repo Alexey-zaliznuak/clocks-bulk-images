@@ -19,6 +19,7 @@ import (
 	"named_clocks/backend/internal/openrouter"
 	"named_clocks/backend/internal/storage"
 	"named_clocks/backend/internal/store"
+	"named_clocks/backend/internal/vkads"
 )
 
 type Server struct {
@@ -28,6 +29,7 @@ type Server struct {
 	storage         *storage.Storage
 	ffmpeg          *media.FFmpeg
 	rater           *currency.Rater
+	vkads           *vkads.Service
 	defaultModel    string
 	defaultDuration int
 	defaultPrompt   string
@@ -41,6 +43,7 @@ type Options struct {
 	DefaultDuration int
 	MaxAudioMB      int64
 	MaxVideoMB      int64
+	VKAds           *vkads.Service
 }
 
 // DefaultVideoPrompt is the out-of-the-box prompt for animating the clock image.
@@ -70,6 +73,7 @@ func NewServer(
 		storage:         strg,
 		ffmpeg:          ff,
 		rater:           rater,
+		vkads:           o.VKAds,
 		defaultModel:    o.DefaultModel,
 		defaultDuration: o.DefaultDuration,
 		defaultPrompt:   DefaultVideoPrompt,
@@ -97,6 +101,7 @@ func (s *Server) Router() http.Handler {
 	r.Group(func(pr chi.Router) {
 		pr.Use(s.auth.Middleware)
 		pr.Get("/api/config", s.handleConfig)
+		pr.Get("/api/vk-ads/status", s.handleVKAdsStatus)
 		pr.Get("/api/models", s.handleModels)
 		pr.Post("/api/tasks/batch", s.handleCreateBatch)
 		pr.Get("/api/tasks", s.handleListTasks)
@@ -152,10 +157,45 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
+	vkAds := map[string]any{"configured": false}
+	if s.vkads != nil {
+		vkAds["configured"] = true
+		vkAds["accountName"] = s.vkads.AccountName()
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"defaultModel":    s.defaultModel,
 		"defaultDuration": s.defaultDuration,
 		"defaultPrompt":   s.defaultPrompt,
+		"vkAds":           vkAds,
+	})
+}
+
+func (s *Server) handleVKAdsStatus(w http.ResponseWriter, r *http.Request) {
+	if s.vkads == nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"configured": false,
+			"ok":         false,
+		})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	user, err := s.vkads.CurrentUser(ctx)
+	if err != nil {
+		log.Printf("api: vk ads status: %v", err)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"configured":  true,
+			"ok":          false,
+			"accountName": s.vkads.AccountName(),
+			"error":       err.Error(),
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"configured":  true,
+		"ok":          true,
+		"accountName": s.vkads.AccountName(),
+		"user":        user,
 	})
 }
 
@@ -180,13 +220,13 @@ type nameInput struct {
 }
 
 type createBatchRequest struct {
-	Title            string            `json:"title"`
-	TemplateID       string            `json:"templateId"`
-	VideoModel       string            `json:"videoModel"`
-	VideoPrompt      string            `json:"videoPrompt"`
-	VideoDuration    *int              `json:"videoDuration"`
-	VideoResolution  string            `json:"videoResolution"`
-	VideoAspectRatio string            `json:"videoAspectRatio"`
+	Title            string `json:"title"`
+	TemplateID       string `json:"templateId"`
+	VideoModel       string `json:"videoModel"`
+	VideoPrompt      string `json:"videoPrompt"`
+	VideoDuration    *int   `json:"videoDuration"`
+	VideoResolution  string `json:"videoResolution"`
+	VideoAspectRatio string `json:"videoAspectRatio"`
 	// GenerateAudio asks the model for a soundtrack instead of muxing one from
 	// the media library. Off by default because it costs noticeably more.
 	GenerateAudio bool              `json:"generateAudio"`

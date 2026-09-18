@@ -1,0 +1,68 @@
+package vkads
+
+import (
+	"testing"
+	"time"
+)
+
+func TestMatchAudienceExactCaseInsensitive(t *testing.T) {
+	older := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	newer := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
+	items := []Segment{
+		{ID: 1, Name: "Иван", Created: older},
+		{ID: 2, Name: "иван", Created: newer},
+		{ID: 3, Name: "Иван ", Created: newer.Add(time.Hour)},
+		{ID: 4, Name: "Иван_ауд", Created: newer.Add(2 * time.Hour)},
+		{ID: 5, Name: "Мария", Created: newer},
+	}
+	got := MatchAudience("Иван", items)
+	if got == nil || got.ID != 2 {
+		t.Fatalf("got %#v, want newest exact Иван", got)
+	}
+	if MatchAudience("Иван ", items) == nil {
+		t.Fatal("value with trailing space should only match an audience that also has it")
+	}
+	if MatchAudience("Пётр", items) != nil {
+		t.Fatal("missing name must not match")
+	}
+}
+
+func TestShowHours(t *testing.T) {
+	hours := ShowHours()
+	if len(hours) != 15 || hours[0] != 6 || hours[len(hours)-1] != 20 {
+		t.Fatalf("hours = %v", hours)
+	}
+}
+
+func TestAgeList(t *testing.T) {
+	got := AgeList(24, 26, false)
+	if len(got) != 3 || got[0] != 24 || got[2] != 26 {
+		t.Fatalf("age = %v", got)
+	}
+	got = AgeList(24, 25, true)
+	if got[0] != 0 || len(got) != 3 {
+		t.Fatalf("unknown age = %v", got)
+	}
+}
+
+func TestPickCommunityMessagePackage(t *testing.T) {
+	packages := []Package{
+		{ID: 1, Name: "Traffic", Objective: "traffic"},
+		{ID: 2, Name: "Community clicks", Objective: "socialengagement"},
+		{ID: 3, Name: "Community", Objective: "community", PricedGoal: &PriceGoal{Name: "Отправка сообщения"}},
+	}
+	got := PickCommunityMessagePackage(packages, "send_message")
+	if got == nil || got.ID != 3 {
+		t.Fatalf("got %#v", got)
+	}
+}
+
+func TestSettingsNormalizeEmpty(t *testing.T) {
+	s := Settings{}.Normalize()
+	if s.CommunityID != DefaultCommunityID || !s.Optimization || s.AgeFrom != 24 || s.BudgetDay == nil || *s.BudgetDay != 999 {
+		t.Fatalf("defaults = %+v", s)
+	}
+	if s.BannerTitle != DefaultBannerTitle || s.BannerCTA != DefaultBannerCTA {
+		t.Fatalf("banner defaults = %+v", s)
+	}
+}

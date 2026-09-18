@@ -25,6 +25,8 @@ func (w *Worker) processCampaignItem(ctx context.Context, item *store.AdCampaign
 		}
 		var err error
 		switch item.Status {
+		case store.StatusAudienceSearching:
+			err = w.campaignFindAudience(ctx, item)
 		case store.StatusQueued, store.StatusImageCreating:
 			err = w.campaignCreateImage(ctx, item)
 		case store.StatusImagePolling:
@@ -60,6 +62,11 @@ func (w *Worker) processCampaignItem(ctx context.Context, item *store.AdCampaign
 	if err := w.store.ReleaseAdCampaignItem(ctx, item.ID); err != nil {
 		log.Printf("worker: release campaign item %s: %v", item.ID, err)
 	}
+	if store.IsTerminal(item.Status) {
+		if err := w.store.MarkCampaignCompletedIfNothingToUpload(ctx, item.CampaignID); err != nil {
+			log.Printf("worker: finalize campaign %s: %v", item.CampaignID, err)
+		}
+	}
 }
 
 func (w *Worker) handleCampaignError(ctx context.Context, item *store.AdCampaignItem, cause error) {
@@ -77,6 +84,24 @@ func (w *Worker) handleCampaignError(ctx context.Context, item *store.AdCampaign
 	if err := w.store.RescheduleAdCampaignItem(ctx, item, delay); err != nil {
 		log.Printf("worker: reschedule campaign item %s: %v", item.ID, err)
 	}
+}
+
+func (w *Worker) campaignFindAudience(ctx context.Context, item *store.AdCampaignItem) error {
+	if item.AudienceID != 0 {
+		item.Status = store.StatusQueued
+		return nil
+	}
+	if w.vkads == nil {
+		return fmt.Errorf("VK Ads не настроен: задайте ZALEY_SECRET и ZALEY_ACCOUNT_NAME")
+	}
+	found, err := w.vkads.FindAudience(ctx, item.Value)
+	if err != nil {
+		return err
+	}
+	item.AudienceID = found.ID
+	item.AudienceName = found.Name
+	item.Status = store.StatusQueued
+	return nil
 }
 
 func (w *Worker) campaignCreateImage(ctx context.Context, item *store.AdCampaignItem) error {

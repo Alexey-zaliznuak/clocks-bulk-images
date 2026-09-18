@@ -14,6 +14,7 @@ import (
 
 	"named_clocks/backend/internal/adcampaign"
 	"named_clocks/backend/internal/store"
+	"named_clocks/backend/internal/vkads"
 )
 
 type createAdCampaignRequest struct {
@@ -32,6 +33,7 @@ type createAdCampaignRequest struct {
 	VideoAspectRatio    string            `json:"videoAspectRatio"`
 	GenerateAudio       bool              `json:"generateAudio"`
 	AudioAssetID        string            `json:"audioAssetId"`
+	VKSettings          vkads.Settings    `json:"vkSettings"`
 }
 
 func (s *Server) handleAdCampaignDefaults(w http.ResponseWriter, _ *http.Request) {
@@ -45,6 +47,7 @@ func (s *Server) handleAdCampaignDefaults(w http.ResponseWriter, _ *http.Request
 			"names":    nameDiagnostics,
 			"surnames": surnameDiagnostics,
 		},
+		"vkSettings": vkads.DefaultSettings(),
 	})
 }
 
@@ -118,6 +121,7 @@ func (s *Server) handleCreateAdCampaign(w http.ResponseWriter, r *http.Request) 
 		VideoModel: req.VideoModel, VideoPrompt: req.VideoPrompt,
 		VideoDuration: req.VideoDuration, VideoResolution: req.VideoResolution, VideoAspectRatio: req.VideoAspectRatio,
 		GenerateAudio: req.GenerateAudio, AudioAssetID: req.AudioAssetID, AudioObject: audioObject,
+		VKSettings: req.VKSettings.Normalize(),
 	}
 	if err := s.store.CreateAdCampaign(r.Context(), campaign, names, surnames); err != nil {
 		log.Printf("api: create ad campaign: %v", err)
@@ -210,6 +214,10 @@ func normalizedCampaignLimit(limit int) int {
 }
 
 func (s *Server) handleStartAdCampaign(w http.ResponseWriter, r *http.Request) {
+	if s.vkads == nil {
+		writeError(w, http.StatusConflict, "VK Ads не настроен: задайте ZALEY_SECRET и ZALEY_ACCOUNT_NAME")
+		return
+	}
 	n, err := s.store.StartAdCampaign(r.Context(), chi.URLParam(r, "id"))
 	if err == sql.ErrNoRows {
 		writeError(w, http.StatusNotFound, "ad campaign not found")

@@ -2,6 +2,7 @@
 
 export const STATUS_LABELS: Record<string, string> = {
   draft: "Черновик",
+  audience_searching: "Ищем аудиторию",
   queued: "В очереди",
   image_creating: "Создаём изображение",
   image_polling: "Ждём изображение",

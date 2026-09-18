@@ -16,6 +16,7 @@ import (
 	"named_clocks/backend/internal/imanator"
 	"named_clocks/backend/internal/openrouter"
 	"named_clocks/backend/internal/store"
+	"named_clocks/backend/internal/vkads"
 )
 
 const (
@@ -96,6 +97,14 @@ func isTransient(err error) bool {
 	var orErr *openrouter.HTTPError
 	if errors.As(err, &orErr) {
 		return isTransientStatus(orErr.StatusCode)
+	}
+	var vkErr *vkads.HTTPError
+	if errors.As(err, &vkErr) {
+		return isTransientStatus(vkErr.StatusCode)
+	}
+	var miss *vkads.AudienceNotFoundError
+	if errors.As(err, &miss) {
+		return false
 	}
 
 	// Errors surfaced by the OpenRouter SDK.

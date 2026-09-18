@@ -1,0 +1,295 @@
+package vkads
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+)
+
+func (s *Service) Post(ctx context.Context, path string, body any) ([]byte, error) {
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	return s.do(ctx, http.MethodPost, path, raw)
+}
+
+type listEnvelope struct {
+	Count  int             `json:"count"`
+	Items  json.RawMessage `json:"items"`
+	Offset int             `json:"offset"`
+}
+
+func (s *Service) getList(ctx context.Context, path string, offset, limit int) (listEnvelope, error) {
+	q := url.Values{}
+	q.Set("limit", strconv.Itoa(limit))
+	q.Set("offset", strconv.Itoa(offset))
+	data, err := s.Get(ctx, path+"?"+q.Encode())
+	if err != nil {
+		return listEnvelope{}, err
+	}
+	var env listEnvelope
+	if err := json.Unmarshal(data, &env); err != nil {
+		return listEnvelope{}, fmt.Errorf("vkads %s: decode list: %w", path, err)
+	}
+	return env, nil
+}
+
+type rawSegment struct {
+	ID      int64  `json:"id"`
+	Name    string `json:"name"`
+	Created string `json:"created"`
+}
+
+func parseCreated(value string) time.Time {
+	for _, layout := range []string{
+		time.RFC3339,
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05",
+		"2006-01-02",
+	} {
+		if t, err := time.ParseInLocation(layout, value, time.Local); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
+}
+
+func (s *Service) ListSegments(ctx context.Context) ([]Segment, error) {
+	s.mu.Lock()
+	if s.segments != nil && s.now().Sub(s.segmentsAt) < 5*time.Minute {
+		out := append([]Segment(nil), s.segments...)
+		s.mu.Unlock()
+		return out, nil
+	}
+	s.mu.Unlock()
+
+	var all []Segment
+	for offset := 0; ; offset += 50 {
+		env, err := s.getList(ctx, "/api/v2/remarketing/segments.json", offset, 50)
+		if err != nil {
+			return nil, err
+		}
+		var raw []rawSegment
+		if len(env.Items) > 0 {
+			if err := json.Unmarshal(env.Items, &raw); err != nil {
+				return nil, fmt.Errorf("vkads segments: %w", err)
+			}
+		}
+		for _, item := range raw {
+			all = append(all, Segment{ID: item.ID, Name: item.Name, Created: parseCreated(item.Created)})
+		}
+		if len(raw) < 50 || (env.Count > 0 && len(all) >= env.Count) {
+			break
+		}
+	}
+	s.mu.Lock()
+	s.segments = all
+	s.segmentsAt = s.now()
+	s.mu.Unlock()
+	return all, nil
+}
+
+// FindAudience returns the newest exact-name segment or a permanent miss.
+func (s *Service) FindAudience(ctx context.Context, name string) (*Segment, error) {
+	items, err := s.ListSegments(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if found := MatchAudience(name, items); found != nil {
+		return found, nil
+	}
+	return nil, &AudienceNotFoundError{Name: name}
+}
+
+// AudienceNotFoundError means no segment matched the name. It is permanent.
+type AudienceNotFoundError struct{ Name string }
+
+func (e *AudienceNotFoundError) Error() string {
+	return fmt.Sprintf("аудитория %q не найдена", e.Name)
+}
+
+type Package struct {
+	ID          int64      `json:"id"`
+	Name        string     `json:"name"`
+	Objective   string     `json:"objective"`
+	PricedGoal  *PriceGoal `json:"priced_goal"`
+	Description string     `json:"description"`
+}
+
+type PriceGoal struct {
+	Name     string `json:"name"`
+	SourceID int64  `json:"source_id"`
+}
+
+type Region struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+type Pad struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+func (s *Service) ListPackages(ctx context.Context) ([]Package, error) {
+	env, err := s.getList(ctx, "/api/v2/packages.json", 0, 200)
+	if err != nil {
+		return nil, err
+	}
+	var items []Package
+	if len(env.Items) > 0 {
+		if err := json.Unmarshal(env.Items, &items); err != nil {
+			return nil, fmt.Errorf("vkads packages: %w", err)
+		}
+	}
+	return items, nil
+}
+
+func (s *Service) ListRegions(ctx context.Context) ([]Region, error) {
+	data, err := s.Get(ctx, "/api/v2/regions.json?limit=500")
+	if err != nil {
+		return nil, err
+	}
+	var env listEnvelope
+	if err := json.Unmarshal(data, &env); err == nil && len(env.Items) > 0 {
+		var items []Region
+		if err := json.Unmarshal(env.Items, &items); err != nil {
+			return nil, err
+		}
+		return items, nil
+	}
+	var items []Region
+	if err := json.Unmarshal(data, &items); err != nil {
+		return nil, fmt.Errorf("vkads regions: %w", err)
+	}
+	return items, nil
+}
+
+func (s *Service) ListPackagePads(ctx context.Context, packageID int64) ([]Pad, error) {
+	q := url.Values{}
+	q.Set("limit", "200")
+	if packageID > 0 {
+		q.Set("_package_id", strconv.FormatInt(packageID, 10))
+	}
+	data, err := s.Get(ctx, "/api/v2/packages_pads.json?"+q.Encode())
+	if err != nil {
+		return nil, err
+	}
+	var env listEnvelope
+	if err := json.Unmarshal(data, &env); err == nil && len(env.Items) > 0 {
+		var items []Pad
+		if err := json.Unmarshal(env.Items, &items); err != nil {
+			return nil, err
+		}
+		return items, nil
+	}
+	var items []Pad
+	_ = json.Unmarshal(data, &items)
+	return items, nil
+}
+
+func (s *Service) CreateURL(ctx context.Context, rawURL string) (int64, error) {
+	data, err := s.Post(ctx, "/api/v2/urls.json", map[string]any{"url": rawURL})
+	if err != nil {
+		return 0, err
+	}
+	var out struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil || out.ID == 0 {
+		return 0, fmt.Errorf("vkads urls: unexpected %s", truncate(data, 300))
+	}
+	return out.ID, nil
+}
+
+func (s *Service) CreateAdPlan(ctx context.Context, body map[string]any) (int64, error) {
+	data, err := s.Post(ctx, "/api/v2/ad_plans.json", body)
+	if err != nil {
+		return 0, err
+	}
+	var out struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil || out.ID == 0 {
+		return 0, fmt.Errorf("vkads ad_plan: unexpected %s", truncate(data, 300))
+	}
+	return out.ID, nil
+}
+
+func (s *Service) CreateAdGroup(ctx context.Context, body map[string]any) (int64, error) {
+	data, err := s.Post(ctx, "/api/v2/ad_groups.json", body)
+	if err != nil {
+		return 0, err
+	}
+	var out struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil || out.ID == 0 {
+		return 0, fmt.Errorf("vkads ad_group: unexpected %s", truncate(data, 300))
+	}
+	return out.ID, nil
+}
+
+func containsFold(haystack string, needles ...string) bool {
+	lower := strings.ToLower(haystack)
+	for _, n := range needles {
+		if strings.Contains(lower, strings.ToLower(n)) {
+			return true
+		}
+	}
+	return false
+}
+
+func PickCommunityMessagePackage(packages []Package, targetAction string) *Package {
+	var fallback *Package
+	for i := range packages {
+		p := &packages[i]
+		blob := p.Objective + " " + p.Name + " " + p.Description
+		community := containsFold(blob, "community", "socialengagement", "социаль", "сообществ", "групп")
+		if !community {
+			continue
+		}
+		if fallback == nil {
+			fallback = p
+		}
+		if p.PricedGoal != nil && containsFold(p.PricedGoal.Name+" "+p.Description+" "+targetAction, "сообщен", "перепис", "conversation") {
+			return p
+		}
+		if p.PricedGoal != nil && containsFold(p.PricedGoal.Name, "message") && containsFold(targetAction, "message") {
+			return p
+		}
+	}
+	return fallback
+}
+
+func PickRussiaRegion(regions []Region) int64 {
+	for _, r := range regions {
+		if containsFold(r.Name, "россия", "russia") && !containsFold(r.Name, "беларус", "казах") {
+			return r.ID
+		}
+	}
+	return 188
+}
+
+func PickVKFeedPads(pads []Pad) []int {
+	var out []int
+	for _, p := range pads {
+		if containsFold(p.Name, "лента", "feed") && containsFold(p.Name, "vk", "вк", "вконтакте", "vkontakte") {
+			out = append(out, p.ID)
+		}
+	}
+	if len(out) == 0 {
+		for _, p := range pads {
+			if containsFold(p.Name, "лента", "feed") {
+				out = append(out, p.ID)
+			}
+		}
+	}
+	return out
+}

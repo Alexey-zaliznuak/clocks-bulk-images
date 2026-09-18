@@ -14,6 +14,7 @@ import (
 
 	"named_clocks/backend/internal/imanator"
 	"named_clocks/backend/internal/openrouter"
+	"named_clocks/backend/internal/vkads"
 )
 
 func TestIsTransient(t *testing.T) {
@@ -48,6 +49,9 @@ func TestIsTransient(t *testing.T) {
 		{"sdk rate limited", &sdkerrors.TooManyRequestsResponseError{}, true},
 		{"sdk unauthorized", &sdkerrors.UnauthorizedResponseError{}, false},
 		{"sdk bad request", &sdkerrors.BadRequestResponseError{}, false},
+		{"vk ads 503", &vkads.HTTPError{StatusCode: 503}, true},
+		{"vk ads 400", &vkads.HTTPError{StatusCode: 400}, false},
+		{"audience miss", &vkads.AudienceNotFoundError{Name: "Иван"}, false},
 		{
 			"wrapped transient status",
 			fmt.Errorf("imanator get order: %w", &imanator.HTTPError{StatusCode: 500}),

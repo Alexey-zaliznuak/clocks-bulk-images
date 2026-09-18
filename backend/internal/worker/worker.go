@@ -11,6 +11,7 @@ import (
 	"named_clocks/backend/internal/openrouter"
 	"named_clocks/backend/internal/storage"
 	"named_clocks/backend/internal/store"
+	"named_clocks/backend/internal/vkads"
 )
 
 // Worker drives tasks through the pipeline:
@@ -29,6 +30,7 @@ type Worker struct {
 	openrouter *openrouter.Client
 	storage    *storage.Storage
 	ffmpeg     *media.FFmpeg
+	vkads      *vkads.Service
 
 	concurrency  int
 	pollInterval time.Duration
@@ -52,6 +54,7 @@ func New(
 	or *openrouter.Client,
 	strg *storage.Storage,
 	ff *media.FFmpeg,
+	vk *vkads.Service,
 	o Options,
 ) *Worker {
 	if o.Concurrency < 1 {
@@ -75,6 +78,7 @@ func New(
 		openrouter:   or,
 		storage:      strg,
 		ffmpeg:       ff,
+		vkads:        vk,
 		concurrency:  o.Concurrency,
 		pollInterval: o.PollInterval,
 		stageTimeout: o.StageTimeout,
@@ -104,6 +108,14 @@ func (w *Worker) loop(ctx context.Context, id int) {
 		}
 
 		if preferCampaign {
+			if campaign, err := w.store.ClaimCampaignForVKUpload(ctx, w.leaseTimeout); err != nil {
+				log.Printf("worker[%d]: vk upload claim error: %v", id, err)
+			} else if campaign != nil {
+				log.Printf("worker[%d]: uploading campaign %s to VK Ads", id, campaign.ID)
+				w.uploadCampaignToVK(ctx, campaign)
+				preferCampaign = false
+				continue
+			}
 			item, err := w.store.ClaimNextAdCampaignItem(ctx, w.leaseTimeout)
 			if err != nil {
 				log.Printf("worker[%d]: campaign claim error: %v", id, err)
@@ -133,6 +145,13 @@ func (w *Worker) loop(ctx context.Context, id int) {
 				continue
 			}
 			if item == nil {
+				if campaign, err := w.store.ClaimCampaignForVKUpload(ctx, w.leaseTimeout); err != nil {
+					log.Printf("worker[%d]: vk upload claim error: %v", id, err)
+				} else if campaign != nil {
+					log.Printf("worker[%d]: uploading campaign %s to VK Ads", id, campaign.ID)
+					w.uploadCampaignToVK(ctx, campaign)
+					continue
+				}
 				sleepCtx(ctx, idle)
 				continue
 			}

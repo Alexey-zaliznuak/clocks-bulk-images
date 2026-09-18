@@ -19,7 +19,9 @@ import (
 	"named_clocks/backend/internal/openrouter"
 	"named_clocks/backend/internal/storage"
 	"named_clocks/backend/internal/store"
+	"named_clocks/backend/internal/vkads"
 	"named_clocks/backend/internal/worker"
+	"named_clocks/backend/internal/zaleycash"
 )
 
 func main() {
@@ -60,6 +62,19 @@ func main() {
 	imClient := imanator.New(cfg.ImanatorBaseURL, cfg.ImanatorAPIKey)
 	orClient := openrouter.New(cfg.OpenRouterBaseURL, cfg.OpenRouterAPIKey, cfg.OpenRouterProxyURL, cfg.OpenRouterTimeout)
 
+	var vkAds *vkads.Service
+	if cfg.ZaleySecret != "" && cfg.ZaleyAccountName != "" {
+		vkAds = vkads.New(vkads.Config{
+			Zaley:       zaleycash.New(cfg.ZaleyBaseURL, cfg.ZaleySecret, 30*time.Second),
+			AccountName: cfg.ZaleyAccountName,
+			AdsBaseURL:  cfg.VKAdsBaseURL,
+			RefreshSkew: cfg.ZaleyTokenRefreshSkew,
+		})
+		log.Printf("vkads: ZaleyCash cabinet %q configured", cfg.ZaleyAccountName)
+	} else {
+		log.Printf("vkads: disabled (set ZALEY_SECRET and ZALEY_ACCOUNT_NAME)")
+	}
+
 	// --- Media tooling ---
 	stretchMode, err := media.ParseStretchMode(cfg.MediaStretchMode)
 	if err != nil {
@@ -80,7 +95,7 @@ func main() {
 	}
 
 	// --- Worker pool ---
-	wk := worker.New(st, imClient, orClient, strg, ff, worker.Options{
+	wk := worker.New(st, imClient, orClient, strg, ff, vkAds, worker.Options{
 		Concurrency:  cfg.WorkerConcurrency,
 		PollInterval: cfg.PollInterval,
 		StageTimeout: cfg.StageTimeout,
@@ -97,6 +112,7 @@ func main() {
 		DefaultDuration: cfg.OpenRouterDefaultDuration,
 		MaxAudioMB:      cfg.MediaMaxAudioMB,
 		MaxVideoMB:      cfg.MediaMaxVideoUploadMB,
+		VKAds:           vkAds,
 	})
 
 	httpServer := &http.Server{

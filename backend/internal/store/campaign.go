@@ -7,9 +7,16 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"named_clocks/backend/internal/vkads"
 )
 
-const CampaignDraft = "draft"
+const (
+	CampaignDraft     = "draft"
+	CampaignRunning   = "running"
+	CampaignUploading = "uploading"
+	CampaignCompleted = "completed"
+)
 
 var ErrCampaignNotDraft = errors.New("campaign is not draft")
 
@@ -40,6 +47,9 @@ type AdCampaign struct {
 	Failed              int               `json:"failed"`
 	CostUSD             float64           `json:"costUsd"`
 	CostRUB             float64           `json:"costRub"`
+	VKSettings          vkads.Settings    `json:"vkSettings"`
+	VKAdPlanID          string            `json:"vkAdPlanId,omitempty"`
+	VKUploadError       string            `json:"vkUploadError,omitempty"`
 }
 
 type AdCampaignItem struct {
@@ -61,6 +71,9 @@ type AdCampaignItem struct {
 	ImageDownloadURL    string            `json:"imageDownloadUrl,omitempty"`
 	SourceDownloadURL   string            `json:"sourceDownloadUrl,omitempty"`
 	VideoDownloadURL    string            `json:"videoDownloadUrl,omitempty"`
+	AudienceID          int64             `json:"audienceId,omitempty"`
+	AudienceName        string            `json:"audienceName,omitempty"`
+	VKAdGroupID         string            `json:"vkAdGroupId,omitempty"`
 	TemplateID          string            `json:"-"`
 	ImageSettings       map[string]string `json:"-"`
 	NameSettingKey      string            `json:"-"`
@@ -82,17 +95,19 @@ func (s *Store) CreateAdCampaign(ctx context.Context, c *AdCampaign, names, surn
 	}
 	defer tx.Rollback() //nolint:errcheck
 	settings, _ := json.Marshal(c.ImageSettings)
+	c.VKSettings = c.VKSettings.Normalize()
+	vkSettings, _ := json.Marshal(c.VKSettings)
 	var audioID sql.NullString
 	if c.AudioAssetID != "" {
 		audioID = sql.NullString{String: c.AudioAssetID, Valid: true}
 	}
 	err = tx.QueryRowContext(ctx, `INSERT INTO ad_campaigns
 		(title,name_text_template,surname_text_template,template_id,image_settings,name_setting_key,
-		 video_model,video_prompt,video_duration,video_resolution,video_aspect_ratio,generate_audio,audio_asset_id,audio_object)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+		 video_model,video_prompt,video_duration,video_resolution,video_aspect_ratio,generate_audio,audio_asset_id,audio_object,vk_settings)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 		RETURNING id,created_at,updated_at`,
 		c.Title, c.NameTextTemplate, c.SurnameTextTemplate, c.TemplateID, settings, c.NameSettingKey,
-		c.VideoModel, c.VideoPrompt, c.VideoDuration, c.VideoResolution, c.VideoAspectRatio, c.GenerateAudio, audioID, c.AudioObject,
+		c.VideoModel, c.VideoPrompt, c.VideoDuration, c.VideoResolution, c.VideoAspectRatio, c.GenerateAudio, audioID, c.AudioObject, vkSettings,
 	).Scan(&c.ID, &c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("insert ad campaign: %w", err)
@@ -119,26 +134,25 @@ func (s *Store) CreateAdCampaign(ctx context.Context, c *AdCampaign, names, surn
 
 const campaignAggregate = `SELECT c.id,c.title,c.lifecycle,c.name_text_template,c.surname_text_template,c.template_id,c.image_settings,
 	c.name_setting_key,c.video_model,c.video_prompt,c.video_duration,c.video_resolution,c.video_aspect_ratio,
-	c.generate_audio,c.audio_asset_id,c.created_at,c.started_at,c.updated_at,
+	c.generate_audio,c.audio_asset_id,c.created_at,c.started_at,c.updated_at,c.vk_settings,c.vk_ad_plan_id,c.vk_upload_error,
 	COUNT(i.id),COUNT(i.id) FILTER(WHERE i.kind='name'),COUNT(i.id) FILTER(WHERE i.kind='surname'),
 	COUNT(i.id) FILTER(WHERE i.status='done'),COUNT(i.id) FILTER(WHERE i.status='failed'),COALESCE(SUM(i.cost_usd),0)
 	FROM ad_campaigns c LEFT JOIN ad_campaign_items i ON i.campaign_id=c.id`
 
 func scanCampaign(row interface{ Scan(...any) error }) (*AdCampaign, error) {
 	var c AdCampaign
-	var raw []byte
+	var raw, vkRaw []byte
 	var audio sql.NullString
 	if err := row.Scan(&c.ID, &c.Title, &c.Lifecycle, &c.NameTextTemplate, &c.SurnameTextTemplate, &c.TemplateID, &raw,
 		&c.NameSettingKey, &c.VideoModel, &c.VideoPrompt, &c.VideoDuration, &c.VideoResolution, &c.VideoAspectRatio,
-		&c.GenerateAudio, &audio, &c.CreatedAt, &c.StartedAt, &c.UpdatedAt, &c.Total, &c.NameCount, &c.SurnameCount,
-		&c.Done, &c.Failed, &c.CostUSD); err != nil {
+		&c.GenerateAudio, &audio, &c.CreatedAt, &c.StartedAt, &c.UpdatedAt, &vkRaw, &c.VKAdPlanID, &c.VKUploadError,
+		&c.Total, &c.NameCount, &c.SurnameCount, &c.Done, &c.Failed, &c.CostUSD); err != nil {
 		return nil, err
 	}
 	c.AudioAssetID = audio.String
 	_ = json.Unmarshal(raw, &c.ImageSettings)
-	if c.Total > 0 && c.Done+c.Failed == c.Total {
-		c.Lifecycle = "completed"
-	}
+	_ = json.Unmarshal(vkRaw, &c.VKSettings)
+	c.VKSettings = c.VKSettings.Normalize()
 	return &c, nil
 }
 
@@ -183,7 +197,7 @@ func (s *Store) StartAdCampaign(ctx context.Context, id string) (int, error) {
 	if _, err = tx.ExecContext(ctx, `UPDATE ad_campaigns SET lifecycle='running',started_at=now(),updated_at=now() WHERE id=$1`, id); err != nil {
 		return 0, err
 	}
-	res, err := tx.ExecContext(ctx, `UPDATE ad_campaign_items SET status='queued',updated_at=now() WHERE campaign_id=$1 AND status='draft'`, id)
+	res, err := tx.ExecContext(ctx, `UPDATE ad_campaign_items SET status='audience_searching',updated_at=now() WHERE campaign_id=$1 AND status='draft'`, id)
 	if err != nil {
 		return 0, err
 	}
@@ -206,7 +220,7 @@ func (s *Store) ListAdCampaignItems(ctx context.Context, campaignID, kind, statu
 		return nil, 0, err
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT id,campaign_id,kind,value,status,error,attempts,imanator_order_id,image_url,image_object,
-		openrouter_job_id,source_video_object,video_object,cost_usd FROM ad_campaign_items
+		openrouter_job_id,source_video_object,video_object,cost_usd,audience_id,audience_name,vk_ad_group_id FROM ad_campaign_items
 		WHERE campaign_id=$1 AND ($2='' OR kind=$2) AND ($3='' OR status=$3) ORDER BY position,id LIMIT $4 OFFSET $5`,
 		campaignID, kind, status, limit, offset)
 	if err != nil {
@@ -216,7 +230,7 @@ func (s *Store) ListAdCampaignItems(ctx context.Context, campaignID, kind, statu
 	var out []*AdCampaignItem
 	for rows.Next() {
 		var i AdCampaignItem
-		if err := rows.Scan(&i.ID, &i.CampaignID, &i.Kind, &i.Value, &i.Status, &i.Error, &i.Attempts, &i.ImanatorOrderID, &i.ImageURL, &i.ImageObject, &i.OpenRouterJobID, &i.SourceVideoObject, &i.VideoObject, &i.CostUSD); err != nil {
+		if err := rows.Scan(&i.ID, &i.CampaignID, &i.Kind, &i.Value, &i.Status, &i.Error, &i.Attempts, &i.ImanatorOrderID, &i.ImageURL, &i.ImageObject, &i.OpenRouterJobID, &i.SourceVideoObject, &i.VideoObject, &i.CostUSD, &i.AudienceID, &i.AudienceName, &i.VKAdGroupID); err != nil {
 			return nil, 0, err
 		}
 		out = append(out, &i)
@@ -225,14 +239,14 @@ func (s *Store) ListAdCampaignItems(ctx context.Context, campaignID, kind, statu
 }
 
 const campaignItemColumns = `i.id,i.campaign_id,i.kind,i.value,i.status,i.error,i.attempts,i.imanator_order_id,i.image_url,i.image_object,
-	i.openrouter_job_id,i.source_video_object,i.video_object,i.cost_usd,c.template_id,c.image_settings,c.name_setting_key,
+	i.openrouter_job_id,i.source_video_object,i.video_object,i.cost_usd,i.audience_id,i.audience_name,i.vk_ad_group_id,c.template_id,c.image_settings,c.name_setting_key,
 	c.name_text_template,c.surname_text_template,c.video_model,c.video_prompt,c.video_duration,c.video_resolution,c.video_aspect_ratio,c.generate_audio,c.audio_object`
 
 func scanClaimedCampaignItem(row interface{ Scan(...any) error }) (*AdCampaignItem, error) {
 	var i AdCampaignItem
 	var raw []byte
 	err := row.Scan(&i.ID, &i.CampaignID, &i.Kind, &i.Value, &i.Status, &i.Error, &i.Attempts, &i.ImanatorOrderID, &i.ImageURL, &i.ImageObject,
-		&i.OpenRouterJobID, &i.SourceVideoObject, &i.VideoObject, &i.CostUSD, &i.TemplateID, &raw, &i.NameSettingKey,
+		&i.OpenRouterJobID, &i.SourceVideoObject, &i.VideoObject, &i.CostUSD, &i.AudienceID, &i.AudienceName, &i.VKAdGroupID, &i.TemplateID, &raw, &i.NameSettingKey,
 		&i.NameTextTemplate, &i.SurnameTextTemplate, &i.VideoModel, &i.VideoPrompt, &i.VideoDuration, &i.VideoResolution, &i.VideoAspectRatio, &i.GenerateAudio, &i.AudioObject)
 	if err != nil {
 		return nil, err
@@ -262,8 +276,8 @@ func (s *Store) ClaimNextAdCampaignItem(ctx context.Context, lease time.Duration
 
 func (s *Store) SaveAdCampaignItem(ctx context.Context, i *AdCampaignItem) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE ad_campaign_items SET status=$2,error=$3,attempts=$4,imanator_order_id=$5,image_url=$6,image_object=$7,
-		openrouter_job_id=$8,source_video_object=$9,video_object=$10,cost_usd=$11,locked_at=now(),updated_at=now() WHERE id=$1`,
-		i.ID, i.Status, i.Error, i.Attempts, i.ImanatorOrderID, i.ImageURL, i.ImageObject, i.OpenRouterJobID, i.SourceVideoObject, i.VideoObject, i.CostUSD)
+		openrouter_job_id=$8,source_video_object=$9,video_object=$10,cost_usd=$11,audience_id=$12,audience_name=$13,vk_ad_group_id=$14,locked_at=now(),updated_at=now() WHERE id=$1`,
+		i.ID, i.Status, i.Error, i.Attempts, i.ImanatorOrderID, i.ImageURL, i.ImageObject, i.OpenRouterJobID, i.SourceVideoObject, i.VideoObject, i.CostUSD, i.AudienceID, i.AudienceName, i.VKAdGroupID)
 	return err
 }
 func (s *Store) TouchAdCampaignItem(ctx context.Context, id string) error {
@@ -275,11 +289,11 @@ func (s *Store) ReleaseAdCampaignItem(ctx context.Context, id string) error {
 	return e
 }
 func (s *Store) RescheduleAdCampaignItem(ctx context.Context, i *AdCampaignItem, d time.Duration) error {
-	_, e := s.db.ExecContext(ctx, `UPDATE ad_campaign_items SET error=$2,attempts=$3,imanator_order_id=$4,image_url=$5,image_object=$6,openrouter_job_id=$7,source_video_object=$8,cost_usd=$9,next_attempt_at=now()+make_interval(secs=>$10),locked_at=NULL,updated_at=now() WHERE id=$1`, i.ID, i.Error, i.Attempts, i.ImanatorOrderID, i.ImageURL, i.ImageObject, i.OpenRouterJobID, i.SourceVideoObject, i.CostUSD, d.Seconds())
+	_, e := s.db.ExecContext(ctx, `UPDATE ad_campaign_items SET error=$2,attempts=$3,imanator_order_id=$4,image_url=$5,image_object=$6,openrouter_job_id=$7,source_video_object=$8,cost_usd=$9,audience_id=$10,audience_name=$11,next_attempt_at=now()+make_interval(secs=>$12),locked_at=NULL,updated_at=now() WHERE id=$1`, i.ID, i.Error, i.Attempts, i.ImanatorOrderID, i.ImageURL, i.ImageObject, i.OpenRouterJobID, i.SourceVideoObject, i.CostUSD, i.AudienceID, i.AudienceName, d.Seconds())
 	return e
 }
 
-const campaignRetrySQL = `CASE WHEN source_video_object<>'' THEN 'audio_mixing' WHEN openrouter_job_id<>'' THEN 'video_polling' WHEN image_object<>'' THEN 'image_ready' ELSE 'queued' END`
+const campaignRetrySQL = `CASE WHEN source_video_object<>'' THEN 'audio_mixing' WHEN openrouter_job_id<>'' THEN 'video_polling' WHEN image_object<>'' THEN 'image_ready' WHEN audience_id<>0 THEN 'queued' ELSE 'audience_searching' END`
 
 func (s *Store) RetryAdCampaignItem(ctx context.Context, id string) (string, error) {
 	var st string
@@ -304,4 +318,102 @@ func (s *Store) DeleteAdCampaign(ctx context.Context, id string) (bool, error) {
 	}
 	n, _ := r.RowsAffected()
 	return n > 0, nil
+}
+
+func CampaignReadyForVKUpload(lifecycle string, total, done, failed int, planID string) bool {
+	if planID != "" {
+		return false
+	}
+	if lifecycle != CampaignRunning && lifecycle != CampaignUploading {
+		return false
+	}
+	return total > 0 && done+failed == total && done > 0
+}
+
+func (s *Store) ClaimCampaignForVKUpload(ctx context.Context, stale time.Duration) (*AdCampaign, error) {
+	if stale <= 0 {
+		stale = 2 * time.Minute
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	var id string
+	err = tx.QueryRowContext(ctx, `SELECT c.id FROM ad_campaigns c
+		WHERE c.lifecycle IN ('running','uploading')
+		  AND (
+		    c.vk_ad_plan_id=''
+		    OR EXISTS (
+		      SELECT 1 FROM ad_campaign_items i
+		      WHERE i.campaign_id=c.id AND i.status='done' AND i.audience_id<>0 AND i.vk_ad_group_id=''
+		    )
+		  )
+		  AND NOT EXISTS (
+		    SELECT 1 FROM ad_campaign_items i
+		    WHERE i.campaign_id=c.id AND i.status NOT IN ('done','failed')
+		  )
+		  AND EXISTS (
+		    SELECT 1 FROM ad_campaign_items i
+		    WHERE i.campaign_id=c.id AND i.status='done' AND i.audience_id<>0
+		  )
+		  AND (c.lifecycle='running' OR c.updated_at < now()-make_interval(secs=>$1))
+		ORDER BY c.updated_at
+		FOR UPDATE OF c SKIP LOCKED
+		LIMIT 1`, stale.Seconds()).Scan(&id)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE ad_campaigns SET lifecycle='uploading',vk_upload_error='',updated_at=now() WHERE id=$1`, id); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return s.GetAdCampaign(ctx, id)
+}
+
+func (s *Store) TouchAdCampaign(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE ad_campaigns SET updated_at=now() WHERE id=$1`, id)
+	return err
+}
+
+func (s *Store) SaveAdCampaignVK(ctx context.Context, c *AdCampaign) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE ad_campaigns SET lifecycle=$2,vk_ad_plan_id=$3,vk_upload_error=$4,updated_at=now() WHERE id=$1`,
+		c.ID, c.Lifecycle, c.VKAdPlanID, c.VKUploadError)
+	return err
+}
+
+func (s *Store) MarkCampaignCompletedIfNothingToUpload(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE ad_campaigns SET lifecycle='completed',updated_at=now()
+		WHERE id=$1 AND lifecycle='running'
+		AND NOT EXISTS (SELECT 1 FROM ad_campaign_items WHERE campaign_id=$1 AND status NOT IN ('done','failed'))
+		AND NOT EXISTS (SELECT 1 FROM ad_campaign_items WHERE campaign_id=$1 AND status='done' AND audience_id<>0)`, id)
+	return err
+}
+
+func (s *Store) SetAdCampaignItemGroupID(ctx context.Context, id, groupID string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE ad_campaign_items SET vk_ad_group_id=$2,updated_at=now() WHERE id=$1`, id, groupID)
+	return err
+}
+
+func (s *Store) ListUploadableAdCampaignItems(ctx context.Context, campaignID string) ([]*AdCampaignItem, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id,campaign_id,kind,value,status,audience_id,audience_name,vk_ad_group_id
+		FROM ad_campaign_items WHERE campaign_id=$1 AND status='done' AND audience_id<>0 ORDER BY position,id`, campaignID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*AdCampaignItem
+	for rows.Next() {
+		var i AdCampaignItem
+		if err := rows.Scan(&i.ID, &i.CampaignID, &i.Kind, &i.Value, &i.Status, &i.AudienceID, &i.AudienceName, &i.VKAdGroupID); err != nil {
+			return nil, err
+		}
+		out = append(out, &i)
+	}
+	return out, rows.Err()
 }
