@@ -168,10 +168,11 @@ type Package struct {
 	Objective   textList        `json:"objective"`
 	PricedGoal  *PriceGoal      `json:"priced_goal"`
 	Description string          `json:"description"`
-	PadsTreeID  int64           `json:"pads_tree_id"`
-	Options     json.RawMessage `json:"options"`
-	Format      json.RawMessage `json:"format"`
-	PatternIDs  []int64         `json:"-"`
+	PadsTreeID     int64           `json:"pads_tree_id"`
+	BannerFormatID int64           `json:"banner_format_id"`
+	Options        json.RawMessage `json:"options"`
+	Format         json.RawMessage `json:"format"`
+	PatternIDs     []int64         `json:"-"`
 }
 
 // textList accepts either "community" or ["community","socialengagement"].
@@ -228,9 +229,10 @@ type Region struct {
 }
 
 type Pad struct {
-	ID          int    `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
+	ID          int             `json:"id"`
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Patterns    json.RawMessage `json:"patterns"`
 }
 
 func (s *Service) ListPackages(ctx context.Context) ([]Package, error) {

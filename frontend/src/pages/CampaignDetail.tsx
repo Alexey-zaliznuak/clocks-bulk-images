@@ -6,7 +6,7 @@ import CampaignSettingsView from "../components/CampaignSettingsView";
 import { formatRub, formatUsd } from "../format";
 import { type PadNode } from "../padsTree";
 import { statusClasses, statusLabel } from "../status";
-import { lifecycleClasses, lifecycleLabel } from "./Campaigns";
+import { isVKUpload, lifecycleClasses, lifecycleLabel } from "./Campaigns";
 
 type KindFilter = "" | "name" | "surname";
 const PAGE_SIZE = 50;
@@ -74,7 +74,7 @@ export default function CampaignDetail() {
   }, [loadCampaign, loadItems]);
 
   useEffect(() => {
-    if (campaign?.lifecycle !== "running" && campaign?.lifecycle !== "uploading") return;
+    if (campaign?.lifecycle !== "running" && !isVKUpload(campaign?.lifecycle || "")) return;
     const timer = window.setInterval(() => {
       void loadCampaign();
       void loadItems();
@@ -174,7 +174,7 @@ export default function CampaignDetail() {
     && !campaign.vkIgnoreFailed
     && campaign.lifecycle !== "completed"
     && campaign.lifecycle !== "draft";
-  const showUploading = campaign.lifecycle === "uploading" && !waitingToIgnore;
+  const showUploading = isVKUpload(campaign.lifecycle) && !waitingToIgnore;
   const canRetry = campaign.lifecycle === "running" && !campaign.vkIgnoreFailed && !campaign.vkAdPlanId;
 
   return (
@@ -203,9 +203,13 @@ export default function CampaignDetail() {
 
       {showUploading && (
         <section className="rounded-2xl border border-violet-200 bg-violet-50 p-5">
-          <h2 className="font-semibold text-violet-900">Загрузка в VK Рекламу</h2>
+          <h2 className="font-semibold text-violet-900">{lifecycleLabel(campaign.lifecycle)}</h2>
           <p className="mt-1 text-sm text-violet-800">
-            Создаём кампанию и группы. Объявления с видео в этом шаге не создаются.
+            {campaign.lifecycle === "vk_groups"
+              ? "Создаём группы объявлений в кабинете VK Рекламы."
+              : campaign.lifecycle === "vk_ads"
+                ? "Загружаем видео и регистрируем объявления в группах."
+                : "Регистрируем кампанию в кабинете VK Рекламы."}
           </p>
         </section>
       )}

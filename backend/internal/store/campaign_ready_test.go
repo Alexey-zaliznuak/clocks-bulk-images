@@ -21,6 +21,9 @@ func TestCampaignReadyForVKUpload(t *testing.T) {
 	if CampaignReadyForVKUpload(CampaignDraft, 2, 2, 0, false) {
 		t.Fatal("draft should not upload")
 	}
+	if !CampaignReadyForVKUpload(CampaignVKPlan, 2, 2, 0, false) {
+		t.Fatal("vk_plan should stay eligible for upload")
+	}
 }
 
 func TestCampaignUploadLocked(t *testing.T) {
@@ -29,6 +32,15 @@ func TestCampaignUploadLocked(t *testing.T) {
 	}
 	if !campaignUploadLocked(CampaignUploading, "", false) {
 		t.Fatal("uploading must lock retries")
+	}
+	if !campaignUploadLocked(CampaignVKPlan, "", false) {
+		t.Fatal("vk_plan must lock retries")
+	}
+	if !campaignUploadLocked(CampaignVKGroups, "", false) {
+		t.Fatal("vk_groups must lock retries")
+	}
+	if !campaignUploadLocked(CampaignVKAds, "", false) {
+		t.Fatal("vk_ads must lock retries")
 	}
 	if !campaignUploadLocked(CampaignRunning, "", true) {
 		t.Fatal("ignored failures must lock retries")

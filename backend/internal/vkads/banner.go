@@ -115,6 +115,9 @@ func collectPatternIDs(v any) []int64 {
 				ids = append(ids, collectPatternIDs(child)...)
 			}
 		}
+		if keys := numericMapKeys(t); len(keys) > 0 && len(keys) >= (len(t)+1)/2 {
+			ids = append(ids, keys...)
+		}
 		return ids
 	}
 	return nil
@@ -185,6 +188,56 @@ func PackageAllowedPatternIDs(pkg Package) []int64 {
 	ids := append([]int64{}, pkg.PatternIDs...)
 	ids = append(ids, ParsePackagePatternIDs(pkg.Options)...)
 	ids = append(ids, ParsePackagePatternIDs(pkg.Format)...)
+	ids = append(ids, numericMapKeysRaw(pkg.Format)...)
+	return uniqueInt64s(ids)
+}
+
+func numericMapKeys(m map[string]any) []int64 {
+	var ids []int64
+	for k := range m {
+		if id := positiveInt64(k); id > 0 {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+func numericMapKeysRaw(raw json.RawMessage) []int64 {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return nil
+	}
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(raw, &obj) != nil || len(obj) == 0 {
+		return nil
+	}
+	var ids []int64
+	for k := range obj {
+		if id := positiveInt64(k); id > 0 {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 || len(ids) < (len(obj)+1)/2 {
+		return nil
+	}
+	return ids
+}
+
+func parsePadPatternIDs(raw json.RawMessage) []int64 {
+	ids := ParsePackagePatternIDs(raw)
+	if len(ids) > 0 {
+		return ids
+	}
+	var s string
+	if json.Unmarshal(raw, &s) != nil || strings.TrimSpace(s) == "" {
+		return nil
+	}
+	for _, part := range strings.FieldsFunc(s, func(r rune) bool {
+		return r == ',' || r == ';' || r == '|' || r == ' '
+	}) {
+		if id := positiveInt64(part); id > 0 {
+			ids = append(ids, id)
+		}
+	}
 	return uniqueInt64s(ids)
 }
 
@@ -256,37 +309,104 @@ func (s *Service) ListBannerPatterns(ctx context.Context) ([]BannerPattern, erro
 func (s *Service) ListPackagePatterns(ctx context.Context, pkg Package) ([]BannerPattern, error) {
 	ids := PackageAllowedPatternIDs(pkg)
 	if len(ids) == 0 && pkg.ID != 0 {
-		data, err := s.Get(ctx, fmt.Sprintf("/api/v2/packages/%d.json?fields=id,options,format", pkg.ID))
-		if err == nil {
-			var one Package
-			if json.Unmarshal(data, &one) == nil {
-				ids = PackageAllowedPatternIDs(one)
-			}
+		if one, err := s.fetchPackage(ctx, pkg.ID); err == nil {
+			pkg = one
+			ids = PackageAllowedPatternIDs(pkg)
 		}
 	}
 	if len(ids) == 0 {
-		return nil, fmt.Errorf("vkads: пакет %d не задаёт паттерны объявлений в options", pkg.ID)
+		ids = s.patternIDsFromPads(ctx)
 	}
-	out := s.fetchPatternsByIDs(ctx, ids)
-	if len(out) == 0 {
-		all, err := s.ListBannerPatterns(ctx)
-		if err != nil {
-			return nil, err
-		}
-		want := map[int64]struct{}{}
-		for _, id := range ids {
-			want[id] = struct{}{}
-		}
-		for _, p := range all {
-			if _, ok := want[p.ID]; ok {
-				out = append(out, p)
+	if len(ids) > 0 {
+		out := withoutCatchAll(s.fetchPatternsByIDs(ctx, ids))
+		if len(out) == 0 {
+			all, err := s.ListBannerPatterns(ctx)
+			if err != nil {
+				return nil, err
 			}
+			want := map[int64]struct{}{}
+			for _, id := range ids {
+				want[id] = struct{}{}
+			}
+			for _, p := range all {
+				if _, ok := want[p.ID]; ok {
+					out = append(out, p)
+				}
+			}
+			out = withoutCatchAll(out)
+		}
+		if len(out) > 0 {
+			return out, nil
 		}
 	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("vkads: паттерны пакета %d не найдены: %v", pkg.ID, ids)
+	if pkg.BannerFormatID != 0 {
+		if out := withoutCatchAll(s.fetchPatternsByQuery(ctx, url.Values{
+			"_banner_format_id": {strconv.FormatInt(pkg.BannerFormatID, 10)},
+			"fields":            {"id,name,description,format"},
+		})); len(out) > 0 {
+			return out, nil
+		}
 	}
-	return out, nil
+	if pkg.ID != 0 {
+		if out := withoutCatchAll(s.fetchPatternsByQuery(ctx, url.Values{
+			"_package_id": {strconv.FormatInt(pkg.ID, 10)},
+			"fields":      {"id,name,description,format"},
+		})); len(out) > 0 {
+			return out, nil
+		}
+	}
+	return nil, fmt.Errorf("vkads: пакет %d не задаёт паттерны объявлений", pkg.ID)
+}
+
+func (s *Service) fetchPackage(ctx context.Context, id int64) (Package, error) {
+	data, err := s.Get(ctx, fmt.Sprintf("/api/v2/packages/%d.json?fields=id,options,format,banner_format_id", id))
+	if err != nil {
+		data, err = s.Get(ctx, fmt.Sprintf("/api/v2/packages.json?fields=id,options,format,banner_format_id&_id=%d&limit=1", id))
+		if err != nil {
+			return Package{}, err
+		}
+	}
+	pkg := decodePackage(data)
+	if pkg.ID == 0 {
+		return Package{}, fmt.Errorf("vkads: пакет %d не найден", id)
+	}
+	return pkg, nil
+}
+
+func decodePackage(data []byte) Package {
+	var one Package
+	if json.Unmarshal(data, &one) == nil && one.ID != 0 {
+		return one
+	}
+	var env struct {
+		Items []Package `json:"items"`
+	}
+	if json.Unmarshal(data, &env) == nil && len(env.Items) > 0 {
+		return env.Items[0]
+	}
+	return Package{}
+}
+
+func (s *Service) patternIDsFromPads(ctx context.Context) []int64 {
+	pads, err := s.ListPackagePads(ctx, 0)
+	if err != nil {
+		return nil
+	}
+	var ids []int64
+	for _, pad := range pads {
+		ids = append(ids, parsePadPatternIDs(pad.Patterns)...)
+	}
+	return uniqueInt64s(ids)
+}
+
+func withoutCatchAll(in []BannerPattern) []BannerPattern {
+	out := make([]BannerPattern, 0, len(in))
+	for _, p := range in {
+		if !isCatchAllPattern(p) {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func (s *Service) fetchPatternsByIDs(ctx context.Context, ids []int64) []BannerPattern {
@@ -297,10 +417,14 @@ func (s *Service) fetchPatternsByIDs(ctx context.Context, ids []int64) []BannerP
 	for _, id := range ids {
 		parts = append(parts, strconv.FormatInt(id, 10))
 	}
-	env, err := s.getListQuery(ctx, "/api/v2/banner_patterns.json", 0, listPageSize, url.Values{
+	return s.fetchPatternsByQuery(ctx, url.Values{
 		"_id__in": {strings.Join(parts, ",")},
 		"fields":  {"id,name,description,format"},
 	})
+}
+
+func (s *Service) fetchPatternsByQuery(ctx context.Context, extra url.Values) []BannerPattern {
+	env, err := s.getListQuery(ctx, "/api/v2/banner_patterns.json", 0, listPageSize, extra)
 	if err != nil || len(env.Items) == 0 {
 		return nil
 	}

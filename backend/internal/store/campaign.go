@@ -15,8 +15,20 @@ const (
 	CampaignDraft     = "draft"
 	CampaignRunning   = "running"
 	CampaignUploading = "uploading"
+	CampaignVKPlan    = "vk_plan"
+	CampaignVKGroups  = "vk_groups"
+	CampaignVKAds     = "vk_ads"
 	CampaignCompleted = "completed"
 )
+
+func CampaignVKUpload(lifecycle string) bool {
+	switch lifecycle {
+	case CampaignUploading, CampaignVKPlan, CampaignVKGroups, CampaignVKAds:
+		return true
+	default:
+		return false
+	}
+}
 
 var (
 	ErrCampaignNotDraft       = errors.New("campaign is not draft")
@@ -220,7 +232,7 @@ func (s *Store) attachCampaignLists(ctx context.Context, c *AdCampaign) error {
 }
 
 func campaignUploadLocked(lifecycle, planID string, ignoreFailed bool) bool {
-	return lifecycle == CampaignUploading || lifecycle == CampaignCompleted || ignoreFailed || planID != ""
+	return CampaignVKUpload(lifecycle) || lifecycle == CampaignCompleted || ignoreFailed || planID != ""
 }
 
 func (s *Store) StartAdCampaign(ctx context.Context, id string) (int, error) {
@@ -385,7 +397,7 @@ func (s *Store) DeleteAdCampaign(ctx context.Context, id string) (bool, error) {
 }
 
 func CampaignReadyForVKUpload(lifecycle string, total, done, failed int, ignoreFailed bool) bool {
-	if lifecycle != CampaignRunning && lifecycle != CampaignUploading {
+	if lifecycle != CampaignRunning && !CampaignVKUpload(lifecycle) {
 		return false
 	}
 	if total <= 0 || done+failed != total || done == 0 {
@@ -399,7 +411,7 @@ func CampaignReadyForVKUpload(lifecycle string, total, done, failed int, ignoreF
 
 func (s *Store) parkBlockedVKUploads(ctx context.Context, id string) error {
 	const sqlText = `UPDATE ad_campaigns c SET lifecycle='running', updated_at=now()
-		WHERE c.lifecycle='uploading' AND NOT c.vk_ignore_failed
+		WHERE c.lifecycle IN ('uploading','vk_plan','vk_groups','vk_ads') AND NOT c.vk_ignore_failed
 		  AND EXISTS (SELECT 1 FROM ad_campaign_items i WHERE i.campaign_id=c.id AND i.status='failed')
 		  AND NOT EXISTS (SELECT 1 FROM ad_campaign_items i WHERE i.campaign_id=c.id AND i.status NOT IN ('done','failed'))`
 	if id == "" {
@@ -420,7 +432,7 @@ func (s *Store) IgnoreAdCampaignFailures(ctx context.Context, id string) error {
 	if err = tx.QueryRowContext(ctx, `SELECT lifecycle FROM ad_campaigns WHERE id=$1 FOR UPDATE`, id).Scan(&lifecycle); err != nil {
 		return err
 	}
-	if lifecycle != CampaignRunning && lifecycle != CampaignUploading {
+	if lifecycle != CampaignRunning && !CampaignVKUpload(lifecycle) {
 		return ErrCampaignNotRunning
 	}
 	var total, done, failed int
@@ -452,7 +464,7 @@ func (s *Store) ClaimCampaignForVKUpload(ctx context.Context, stale time.Duratio
 	defer tx.Rollback() //nolint:errcheck
 	var id string
 	err = tx.QueryRowContext(ctx, `SELECT c.id FROM ad_campaigns c
-		WHERE c.lifecycle IN ('running','uploading','completed')
+		WHERE c.lifecycle IN ('running','uploading','vk_plan','vk_groups','vk_ads','completed')
 		  AND (
 		    c.vk_ad_plan_id=''
 		    OR EXISTS (
@@ -486,7 +498,17 @@ func (s *Store) ClaimCampaignForVKUpload(ctx context.Context, stale time.Duratio
 	if err != nil {
 		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE ad_campaigns SET lifecycle='uploading',vk_upload_error='',updated_at=now() WHERE id=$1`, id); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE ad_campaigns SET
+		lifecycle = CASE
+			WHEN vk_ad_plan_id='' THEN 'vk_plan'
+			WHEN EXISTS (
+				SELECT 1 FROM ad_campaign_items i
+				WHERE i.campaign_id=$1 AND i.status='done' AND i.audience_id<>0 AND i.vk_ad_group_id=''
+			) THEN 'vk_groups'
+			ELSE 'vk_ads'
+		END,
+		vk_upload_error='', updated_at=now()
+		WHERE id=$1`, id); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {

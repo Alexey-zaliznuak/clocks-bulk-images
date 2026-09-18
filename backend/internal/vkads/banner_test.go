@@ -34,6 +34,26 @@ func TestPackageAllowedPatternIDsUsesFormat(t *testing.T) {
 	}
 }
 
+func TestParsePackagePatternIDsFromIDMap(t *testing.T) {
+	got := ParsePackagePatternIDs([]byte(`{"settings":{"patterns":{"values":{"486":{},"422":{},"525":{}}}}}`))
+	want := map[int64]bool{486: true, 422: true, 525: true}
+	if len(got) != 3 {
+		t.Fatalf("got %v", got)
+	}
+	for _, id := range got {
+		if !want[id] {
+			t.Fatalf("unexpected %d in %v", id, got)
+		}
+	}
+}
+
+func TestParsePadPatternIDs(t *testing.T) {
+	got := parsePadPatternIDs([]byte(`"486,422,525"`))
+	if len(got) != 3 || got[0] != 486 {
+		t.Fatalf("got %v", got)
+	}
+}
+
 func TestBannerBodyUsesPackagePattern(t *testing.T) {
 	pattern := &BannerPattern{ID: 486, Format: []BannerSlot{
 		{Field: "url", Role: "primary", Required: true},

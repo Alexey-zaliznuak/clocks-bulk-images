@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"named_clocks/backend/internal/adcampaign"
 	"named_clocks/backend/internal/store"
@@ -23,7 +24,9 @@ func (w *Worker) uploadCampaignToVK(ctx context.Context, campaign *store.AdCampa
 	if err := w.doVKUpload(ctx, campaign); err != nil {
 		log.Printf("worker: vk upload %s: %v", campaign.ID, err)
 		campaign.VKUploadError = err.Error()
-		campaign.Lifecycle = store.CampaignUploading
+		if !store.CampaignVKUpload(campaign.Lifecycle) {
+			campaign.Lifecycle = store.CampaignVKPlan
+		}
 		_ = w.store.SaveAdCampaignVK(ctx, campaign)
 		return
 	}
@@ -34,9 +37,21 @@ func (w *Worker) uploadCampaignToVK(ctx context.Context, campaign *store.AdCampa
 	}
 }
 
+func (w *Worker) setVKStage(ctx context.Context, campaign *store.AdCampaign, stage string) error {
+	campaign.Lifecycle = stage
+	campaign.VKUploadError = ""
+	if err := w.store.SaveAdCampaignVK(ctx, campaign); err != nil {
+		return err
+	}
+	return w.store.TouchAdCampaign(ctx, campaign.ID)
+}
+
 func (w *Worker) doVKUpload(ctx context.Context, campaign *store.AdCampaign) error {
 	_ = w.store.TouchAdCampaign(ctx, campaign.ID)
 	settings := campaign.VKSettings.Normalize()
+	if err := w.setVKStage(ctx, campaign, store.CampaignVKPlan); err != nil {
+		return err
+	}
 	log.Printf("worker: vk upload %s: resolve catalog", campaign.ID)
 	cat, err := w.vkads.ResolveCatalog(ctx, settings, campaign.CreatedAt)
 	if err != nil {
@@ -46,34 +61,16 @@ func (w *Worker) doVKUpload(ctx context.Context, campaign *store.AdCampaign) err
 	if err != nil {
 		return err
 	}
-	banners := make([]map[string]any, len(items))
-	for i, item := range items {
-		if item.VKBannerID != "" {
-			continue
-		}
-		_ = w.store.TouchAdCampaign(ctx, campaign.ID)
-		log.Printf("worker: vk upload %s: upload video %s", campaign.ID, item.Value)
-		banner, err := w.prepareBanner(ctx, item, settings, cat)
-		if err != nil {
-			return fmt.Errorf("видео %q: %w", item.Value, err)
-		}
-		banners[i] = banner
+	if len(items) == 0 {
+		return fmt.Errorf("нет групп для создания кампании ВКР")
 	}
 
 	if campaign.VKAdPlanID == "" {
-		if len(items) == 0 {
-			return fmt.Errorf("нет групп для создания кампании ВКР")
+		if err := w.setVKStage(ctx, campaign, store.CampaignVKPlan); err != nil {
+			return err
 		}
-		groups := make([]map[string]any, 0, len(items))
-		for i, item := range items {
-			group := vkads.NestedGroupBody(item.Value, item.AudienceID, settings, cat)
-			if banners[i] != nil {
-				vkads.AttachBanner(group, banners[i])
-			}
-			groups = append(groups, group)
-		}
-		log.Printf("worker: vk upload %s: create ad_plan with %d groups", campaign.ID, len(groups))
-		planID, created, err := w.vkads.CreateAdPlan(ctx, vkads.AttachCampaigns(vkads.PlanBody(campaign.Title, settings, cat), groups))
+		log.Printf("worker: vk upload %s: create ad_plan", campaign.ID)
+		planID, created, err := w.createAdPlan(ctx, campaign, settings, cat, items)
 		if err != nil {
 			return fmt.Errorf("создать кампанию ВКР: %w", err)
 		}
@@ -91,9 +88,39 @@ func (w *Worker) doVKUpload(ctx context.Context, campaign *store.AdCampaign) err
 	if err != nil {
 		return fmt.Errorf("id кампании ВКР: %w", err)
 	}
+
+	if err := w.setVKStage(ctx, campaign, store.CampaignVKGroups); err != nil {
+		return err
+	}
 	var last error
+	for _, item := range items {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if item.VKAdGroupID != "" {
+			continue
+		}
+		_ = w.store.TouchAdCampaign(ctx, campaign.ID)
+		log.Printf("worker: vk upload %s: create group %s", campaign.ID, item.Value)
+		got, err := w.vkads.CreateAdGroup(ctx, vkads.GroupBody(item.Value, planID, item.AudienceID, settings, cat))
+		if err != nil {
+			last = fmt.Errorf("группа %q: %w", item.Value, err)
+			log.Printf("worker: vk group %s/%s: %v", campaign.ID, item.Value, err)
+			continue
+		}
+		if err := w.persistCreated(ctx, item, got); err != nil {
+			last = err
+		}
+	}
+	if last != nil {
+		return last
+	}
+
+	if err := w.setVKStage(ctx, campaign, store.CampaignVKAds); err != nil {
+		return err
+	}
 	createdBanners := 0
-	for i, item := range items {
+	for _, item := range items {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -101,16 +128,20 @@ func (w *Worker) doVKUpload(ctx context.Context, campaign *store.AdCampaign) err
 			continue
 		}
 		_ = w.store.TouchAdCampaign(ctx, campaign.ID)
-		if banners[i] == nil {
+		log.Printf("worker: vk upload %s: upload video %s", campaign.ID, item.Value)
+		banner, err := w.prepareBanner(ctx, item, settings, cat)
+		if err != nil {
+			last = fmt.Errorf("видео %q: %w", item.Value, err)
+			log.Printf("worker: vk banner %s/%s: %v", campaign.ID, item.Value, err)
 			continue
 		}
 		oldGroup, _ := strconv.ParseInt(item.VKAdGroupID, 10, 64)
 		group := vkads.GroupBody(item.Value, planID, item.AudienceID, settings, cat)
-		vkads.AttachBanner(group, banners[i])
+		vkads.AttachBanner(group, banner)
 		log.Printf("worker: vk upload %s: create group+banner %s", campaign.ID, item.Value)
 		got, err := w.vkads.CreateAdGroup(ctx, group)
 		if err != nil {
-			last = fmt.Errorf("группа/объявление %q: %w", item.Value, err)
+			last = fmt.Errorf("объявление %q: %w", item.Value, err)
 			log.Printf("worker: vk group %s/%s: %v", campaign.ID, item.Value, err)
 			continue
 		}
@@ -131,6 +162,30 @@ func (w *Worker) doVKUpload(ctx context.Context, campaign *store.AdCampaign) err
 	}
 	log.Printf("worker: vk upload %s: done plan=%s banners=%d", campaign.ID, campaign.VKAdPlanID, createdBanners)
 	return nil
+}
+
+func (w *Worker) createAdPlan(ctx context.Context, campaign *store.AdCampaign, settings vkads.Settings, cat *vkads.Catalog, items []*store.AdCampaignItem) (int64, []vkads.CreatedGroup, error) {
+	planID, created, err := w.vkads.CreateAdPlan(ctx, vkads.PlanBody(campaign.Title, settings, cat))
+	if err == nil {
+		return planID, created, nil
+	}
+	if !adPlanNeedsGroups(err) {
+		return 0, nil, err
+	}
+	groups := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		groups = append(groups, vkads.NestedGroupBody(item.Value, item.AudienceID, settings, cat))
+	}
+	log.Printf("worker: vk upload %s: ad_plan requires groups, retry with %d groups", campaign.ID, len(groups))
+	return w.vkads.CreateAdPlan(ctx, vkads.AttachCampaigns(vkads.PlanBody(campaign.Title, settings, cat), groups))
+}
+
+func adPlanNeedsGroups(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "ad_groups") || strings.Contains(msg, "campaigns")
 }
 
 func (w *Worker) saveCreatedGroups(ctx context.Context, items []*store.AdCampaignItem, created []vkads.CreatedGroup) error {

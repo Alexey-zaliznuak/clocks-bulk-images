@@ -109,11 +109,21 @@ export default function Campaigns() {
   );
 }
 
+export function isVKUpload(lifecycle: string): boolean {
+  return lifecycle === "uploading"
+    || lifecycle === "vk_plan"
+    || lifecycle === "vk_groups"
+    || lifecycle === "vk_ads";
+}
+
 export function lifecycleLabel(lifecycle: string): string {
   const labels: Record<string, string> = {
     draft: "Черновик",
     running: "Подготовка креативов",
     uploading: "Загрузка в рекламный кабинет",
+    vk_plan: "Регистрация кампании",
+    vk_groups: "Регистрация групп",
+    vk_ads: "Регистрация объявлений",
     completed: "Завершено",
   };
   return labels[lifecycle] || lifecycle;
@@ -122,6 +132,6 @@ export function lifecycleLabel(lifecycle: string): string {
 export function lifecycleClasses(lifecycle: string): string {
   if (lifecycle === "draft") return "border-amber-200 bg-amber-50 text-amber-700";
   if (lifecycle === "completed") return "border-emerald-200 bg-emerald-50 text-emerald-700";
-  if (lifecycle === "uploading") return "border-violet-200 bg-violet-50 text-violet-700";
+  if (isVKUpload(lifecycle)) return "border-violet-200 bg-violet-50 text-violet-700";
   return "border-blue-200 bg-blue-50 text-blue-700";
 }
