@@ -57,7 +57,7 @@ func (s *Service) ResolveCatalog(ctx context.Context, settings Settings, created
 	if start == "" {
 		start = createdAt.Format("2006-01-02")
 	}
-	patterns, err := s.ListPackagePatterns(ctx, *pkg)
+	patterns, err := s.ListPackagePatterns(ctx, *pkg, pads)
 	if err != nil {
 		return nil, err
 	}

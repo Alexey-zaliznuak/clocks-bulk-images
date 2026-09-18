@@ -68,6 +68,48 @@ func TestRequestLogBodySkipsMultipart(t *testing.T) {
 	}
 }
 
+const packageOptionsWithPadPatterns = `{"targetings":[{"name":"pads","default":[102641,1265106],
+	"patterns":[
+		{"pad":"102641","patterns":[{"id":400,"required":false},{"id":401,"required":false}]},
+		{"pad":"1265106","patterns":[{"id":486,"required":false},{"id":525,"required":false}]}
+	],
+	"values":[102641,1265106]}],
+	"settings":[{"name":"autobidding_mode","values":["max_goals"]}]}`
+
+func TestParsePackagePadPatterns(t *testing.T) {
+	got := ParsePackagePadPatterns([]byte(packageOptionsWithPadPatterns))
+	if len(got) != 2 || len(got[102641]) != 2 || got[102641][0] != 400 {
+		t.Fatalf("got %v", got)
+	}
+	if len(got[1265106]) != 2 || got[1265106][0] != 486 {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestPackagePatternIDsForPadsNarrowsToSelectedPads(t *testing.T) {
+	pkg := Package{ID: 3122, Options: []byte(packageOptionsWithPadPatterns)}
+	got := PackagePatternIDsForPads(pkg, []int{1265106})
+	if len(got) != 2 || got[0] != 486 || got[1] != 525 {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestPackagePatternIDsForPadsFallsBackToAllPads(t *testing.T) {
+	pkg := Package{ID: 3122, Options: []byte(packageOptionsWithPadPatterns)}
+	got := PackagePatternIDsForPads(pkg, []int{999999})
+	if len(got) != 4 {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestPackageAllowedPatternIDsReadsPadPatterns(t *testing.T) {
+	pkg := Package{ID: 3122, Options: []byte(packageOptionsWithPadPatterns)}
+	got := PackageAllowedPatternIDs(pkg)
+	if len(got) != 4 {
+		t.Fatalf("got %v", got)
+	}
+}
+
 func TestParsePadPatternIDs(t *testing.T) {
 	got := parsePadPatternIDs([]byte(`"486,422,525"`))
 	if len(got) != 3 || got[0] != 486 {
