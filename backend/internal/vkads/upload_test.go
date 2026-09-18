@@ -109,7 +109,7 @@ func TestParseCreateGroupReadsBanners(t *testing.T) {
 
 func TestAttachBanner(t *testing.T) {
 	group := NestedGroupBody("Аркадий", 77, testSettings(true, 999), testCatalog())
-	banner := BannerBody("Аркадий", 0, 9, 55, 0, "title", "text", "contactUs", &BannerPattern{Format: []BannerSlot{
+	banner := BannerBody("Аркадий", 0, 9, 55, nil, "title", "text", "contactUs", &BannerPattern{Format: []BannerSlot{
 		{Field: "url", Role: "primary"},
 		{Field: "content", Role: "video_vertical"},
 	}})

@@ -260,6 +260,26 @@ func (f *FFmpeg) stretchArgs(videoPath, audioPath, outPath string, videoDur, aud
 // than the defaults while costing several times the CPU.
 const interpolateParams = "mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1:scd=none"
 
+// ResizeImage rewrites an image at exactly width x height, cropping the
+// overflowing side so the subject stays centred. VK Ads rejects creatives that
+// do not match the pixel size of the banner role they are uploaded for.
+func (f *FFmpeg) ResizeImage(ctx context.Context, inPath, outPath string, width, height int) error {
+	if width <= 0 || height <= 0 {
+		return fmt.Errorf("media: invalid target size %dx%d", width, height)
+	}
+	filter := fmt.Sprintf(
+		"scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d",
+		width, height, width, height,
+	)
+	return f.run(ctx, []string{
+		"-nostdin", "-y",
+		"-i", inPath,
+		"-vf", filter,
+		"-frames:v", "1",
+		outPath,
+	})
+}
+
 // ExtractMP3 writes the audio track of a media file as an mp3.
 func (f *FFmpeg) ExtractMP3(ctx context.Context, inPath, outPath string) error {
 	info, err := f.Probe(ctx, inPath)

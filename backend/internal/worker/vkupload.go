@@ -270,13 +270,15 @@ func (w *Worker) prepareBanner(ctx context.Context, item *store.AdCampaignItem, 
 		return nil, fmt.Errorf("в пакете нет паттерна объявления")
 	}
 	log.Printf("worker: vk upload banner %s: pattern %d %s", item.Value, pattern.ID, pattern.Name)
-	var imageID int64
-	if vkads.PatternNeedsImage(pattern) && item.ImageObject != "" {
-		id, err := w.uploadBannerImage(ctx, item)
-		if err != nil {
-			return nil, fmt.Errorf("загрузить картинку: %w", err)
+	images := map[string]int64{}
+	if item.ImageObject != "" {
+		for _, role := range vkads.PatternImageRoles(pattern) {
+			id, err := w.uploadBannerImage(ctx, item, role)
+			if err != nil {
+				return nil, fmt.Errorf("загрузить картинку %s: %w", role, err)
+			}
+			images[role] = id
 		}
-		imageID = id
 	}
 	text := item.NameTextTemplate
 	if item.Kind == "surname" {
@@ -287,7 +289,7 @@ func (w *Worker) prepareBanner(ctx context.Context, item *store.AdCampaignItem, 
 		0,
 		cat.URLID,
 		videoID,
-		imageID,
+		images,
 		settings.BannerTitle,
 		adcampaign.RenderNameText(text, item.Value),
 		vkads.CommunityCTA(settings.TargetAction),
@@ -295,7 +297,7 @@ func (w *Worker) prepareBanner(ctx context.Context, item *store.AdCampaignItem, 
 	), nil
 }
 
-func (w *Worker) uploadBannerImage(ctx context.Context, item *store.AdCampaignItem) (int64, error) {
+func (w *Worker) uploadBannerImage(ctx context.Context, item *store.AdCampaignItem, role string) (int64, error) {
 	dir, err := os.MkdirTemp(w.ffmpeg.TempDir(), "vk-image-*")
 	if err != nil {
 		return 0, err
@@ -305,14 +307,15 @@ func (w *Worker) uploadBannerImage(ctx context.Context, item *store.AdCampaignIt
 	if err := w.fetchToFile(ctx, item.ImageObject, local); err != nil {
 		return 0, err
 	}
-	width, height := 1080, 1080
-	if info, err := w.ffmpeg.Probe(ctx, local); err == nil && info.Width > 0 {
-		width, height = info.Width, info.Height
+	width, height := vkads.RoleImageSize(role)
+	sized := filepath.Join(dir, "sized.jpg")
+	if err := w.ffmpeg.ResizeImage(ctx, local, sized, width, height); err != nil {
+		return 0, err
 	}
-	f, err := os.Open(local)
+	f, err := os.Open(sized)
 	if err != nil {
 		return 0, err
 	}
 	defer f.Close()
-	return w.vkads.UploadStatic(ctx, item.Value+".jpg", f, width, height)
+	return w.vkads.UploadStatic(ctx, fmt.Sprintf("%s_%s.jpg", item.Value, role), f, width, height)
 }

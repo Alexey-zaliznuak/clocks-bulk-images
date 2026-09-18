@@ -570,7 +570,7 @@ func AttachBanner(group, banner map[string]any) map[string]any {
 	return group
 }
 
-func BannerBody(name string, groupID, urlID, videoID, imageID int64, title, text, cta string, pattern *BannerPattern) map[string]any {
+func BannerBody(name string, groupID, urlID, videoID int64, images map[string]int64, title, text, cta string, pattern *BannerPattern) map[string]any {
 	body := map[string]any{
 		"name":   name,
 		"status": "active",
@@ -596,8 +596,8 @@ func BannerBody(name string, groupID, urlID, videoID, imageID int64, title, text
 				if videoID > 0 {
 					content[slot.Role] = map[string]any{"id": videoID}
 				}
-			} else if imageID > 0 {
-				content[slot.Role] = map[string]any{"id": imageID}
+			} else if id := images[slot.Role]; id > 0 {
+				content[slot.Role] = map[string]any{"id": id}
 			}
 		case "textblock":
 			role := slot.Role
@@ -703,15 +703,50 @@ func aspectHint(videoRole string) string {
 }
 
 func PatternNeedsImage(p *BannerPattern) bool {
+	return len(PatternImageRoles(p)) > 0
+}
+
+// PatternImageRoles lists the still-image slots of a pattern, e.g.
+// icon_256x256 or image_600x600. Each one needs its own upload: the role name
+// carries the exact pixel size VK validates the creative against.
+func PatternImageRoles(p *BannerPattern) []string {
 	if p == nil {
-		return false
+		return nil
 	}
+	var roles []string
+	seen := map[string]struct{}{}
 	for _, slot := range p.Format {
-		if slot.Field == "content" && !strings.Contains(slot.Role, "video") {
-			return true
+		if slot.Field != "content" || strings.Contains(slot.Role, "video") {
+			continue
+		}
+		if _, ok := seen[slot.Role]; ok {
+			continue
+		}
+		seen[slot.Role] = struct{}{}
+		roles = append(roles, slot.Role)
+	}
+	return roles
+}
+
+// RoleImageSize reads the pixel size encoded in a role name. Roles without one
+// fall back to a square that stays inside every documented limit.
+func RoleImageSize(role string) (int, int) {
+	digits := func(s string) (int, bool) {
+		n, err := strconv.Atoi(s)
+		return n, err == nil && n > 0
+	}
+	for _, part := range strings.Split(role, "_") {
+		x := strings.Index(part, "x")
+		if x <= 0 || x == len(part)-1 {
+			continue
+		}
+		w, okW := digits(part[:x])
+		h, okH := digits(part[x+1:])
+		if okW && okH {
+			return w, h
 		}
 	}
-	return false
+	return 600, 600
 }
 
 func VideoRole(width, height int) string {

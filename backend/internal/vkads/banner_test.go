@@ -118,7 +118,8 @@ func TestBannerBodyUsesPackagePattern(t *testing.T) {
 		{Field: "textblock", Role: "text_2000", Required: true},
 		{Field: "textblock", Role: "cta_community_vk", Required: true},
 	}}
-	body := BannerBody("Аркадий", 0, 9, 55, 66, "RuTime | именные наручные часы", "Аркадий - имя", "contactUs", pattern)
+	images := map[string]int64{"image_600x600": 66}
+	body := BannerBody("Аркадий", 0, 9, 55, images, "RuTime | именные наручные часы", "Аркадий - имя", "contactUs", pattern)
 	content, _ := body["content"].(map[string]any)
 	if _, ok := content["video_vertical"].(map[string]any); !ok {
 		t.Fatalf("video = %#v", content)
@@ -131,6 +132,32 @@ func TestBannerBodyUsesPackagePattern(t *testing.T) {
 	}
 	if _, ok := body["patterns"]; ok {
 		t.Fatal("banner has no patterns field, VK infers it from the roles")
+	}
+}
+
+func TestRoleImageSize(t *testing.T) {
+	cases := map[string][2]int{
+		"icon_256x256":   {256, 256},
+		"image_1080x607": {1080, 607},
+		"image_wide":     {600, 600},
+	}
+	for role, want := range cases {
+		w, h := RoleImageSize(role)
+		if w != want[0] || h != want[1] {
+			t.Fatalf("%s = %dx%d, want %dx%d", role, w, h, want[0], want[1])
+		}
+	}
+}
+
+func TestPatternImageRolesSkipsVideo(t *testing.T) {
+	pattern := &BannerPattern{Format: []BannerSlot{
+		{Field: "content", Role: "video_portrait_9_16_30s"},
+		{Field: "content", Role: "icon_256x256"},
+		{Field: "textblock", Role: "title_40_vkads"},
+	}}
+	roles := PatternImageRoles(pattern)
+	if len(roles) != 1 || roles[0] != "icon_256x256" {
+		t.Fatalf("roles = %v", roles)
 	}
 }
 
