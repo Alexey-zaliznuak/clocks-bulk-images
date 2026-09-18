@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -48,7 +49,15 @@ func (c *Client) CreateOrder(ctx context.Context, templateID string, settings ma
 		return nil, err
 	}
 	c.setHeaders(req)
-	return c.do(req)
+	order, err := c.do(req)
+	if err != nil {
+		var httpErr *HTTPError
+		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
+			return nil, &TemplateNotFoundError{TemplateID: templateID, Err: httpErr}
+		}
+		return nil, err
+	}
+	return order, nil
 }
 
 // GetOrder fetches the current state of an order for polling.
@@ -78,6 +87,28 @@ type HTTPError struct {
 
 func (e *HTTPError) Error() string {
 	return fmt.Sprintf("imanator %s: status %d: %s", e.Path, e.StatusCode, e.Body)
+}
+
+// TemplateNotFoundError is a 404 from create-order: the template id does not exist.
+type TemplateNotFoundError struct {
+	TemplateID string
+	Err        error
+}
+
+func (e *TemplateNotFoundError) Error() string {
+	return fmt.Sprintf("шаблон Imanator %q не найден", e.TemplateID)
+}
+
+func (e *TemplateNotFoundError) Unwrap() error { return e.Err }
+
+// IsApplicationNotFound reports a JSON 404 from the Imanator app itself
+// (route or resource missing). An empty or HTML 404 from a dead proxy is not this.
+func (e *HTTPError) IsApplicationNotFound() bool {
+	if e == nil || e.StatusCode != http.StatusNotFound {
+		return false
+	}
+	body := strings.ToLower(e.Body)
+	return strings.Contains(body, `"statuscode":404`) && strings.Contains(body, "not found")
 }
 
 func (c *Client) do(req *http.Request) (*Order, error) {

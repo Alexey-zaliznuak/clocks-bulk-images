@@ -84,11 +84,19 @@ func isTransient(err error) bool {
 		return true
 	}
 
+	var missing *imanator.TemplateNotFoundError
+	if errors.As(err, &missing) {
+		return false
+	}
+
 	// Typed HTTP statuses from our own clients.
 	var imErr *imanator.HTTPError
 	if errors.As(err, &imErr) {
-		// Imanator's edge/proxy returns 404 while the upstream service is down.
-		// Treat it as an outage here without changing 404 handling for other APIs.
+		// A NestJS/JSON 404 means the process is up and the route is gone.
+		// An empty or HTML 404 from the edge still looks like an outage.
+		if imErr.IsApplicationNotFound() {
+			return false
+		}
 		if imErr.StatusCode == http.StatusNotFound {
 			return true
 		}
