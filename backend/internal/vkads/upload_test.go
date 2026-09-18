@@ -32,6 +32,9 @@ func TestPlanBodyBudgetStringWhenOptimized(t *testing.T) {
 	if _, ok := body["ad_groups"]; ok {
 		t.Fatal("plan must not send empty ad_groups")
 	}
+	if _, ok := body["enable_utm"]; ok {
+		t.Fatal("ad_plan does not accept enable_utm")
+	}
 	group := NestedGroupBody("Гущин", 77, testSettings(true, 999), testCatalog())
 	if _, ok := group["ad_plan_id"]; ok {
 		t.Fatal("nested group must not have ad_plan_id")

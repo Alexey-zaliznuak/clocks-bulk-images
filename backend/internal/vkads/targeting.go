@@ -73,7 +73,7 @@ func groupTargetings(settings Settings, audienceID, russiaRegion int64, pads []i
 	if audienceID > 0 {
 		ids := []int64{audienceID}
 		target["segments"] = ids
-		target["remarketing"] = map[string]any{"segments": ids}
+		target["remarketing"] = ids
 	}
 	return target
 }

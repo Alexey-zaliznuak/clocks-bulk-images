@@ -63,8 +63,6 @@ func PlanBody(name string, settings Settings, cat *Catalog) map[string]any {
 		"name":             name,
 		"status":           "active",
 		"date_start":       cat.DateStart,
-		"enable_utm":       false,
-		"utm":              settings.RefTags,
 		"objective":        cat.Package.Objective.ForAPI(),
 		"ad_object_type":   "url",
 		"ad_object_id":     cat.URLID,
