@@ -34,11 +34,8 @@ func (s *Service) ResolveCatalog(ctx context.Context, settings Settings, created
 		return nil, err
 	}
 	russia := PickRussiaRegion(regions)
-	trees, err := s.ListPlacementTree(ctx)
-	if err != nil {
-		return nil, err
-	}
-	pads := ResolvePads(settings.Pads, *pkg, trees)
+	tree := s.PackageTree(ctx, *pkg)
+	pads := ResolvePadsInTree(settings.Pads, *pkg, tree)
 	if len(pads) == 0 {
 		listed, err := s.ListPackagePads(ctx, pkg.ID)
 		if err != nil {
@@ -49,7 +46,8 @@ func (s *Service) ResolveCatalog(ctx context.Context, settings Settings, created
 	if len(pads) == 0 {
 		return nil, fmt.Errorf("vkads: не нашли ленту ВК среди площадок пакета %d — выберите места размещения вручную", pkg.ID)
 	}
-	log.Printf("vkads пакет %d: площадки %v", pkg.ID, pads)
+	log.Printf("vkads пакет %d: дерево %d (%d площадок), выбрано %v",
+		pkg.ID, pkg.PadsTreeID, len(CollectPadIDs(tree)), pads)
 	communityURL := fmt.Sprintf("https://vk.com/club%d", settings.CommunityID)
 	if tags := strings.TrimSpace(settings.RefTags); tags != "" {
 		communityURL += "?" + strings.TrimPrefix(tags, "?")
