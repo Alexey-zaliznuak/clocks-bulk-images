@@ -37,6 +37,18 @@ func newService(t *testing.T, zaleyURL, adsURL string, clock *clocks, skew time.
 	return s
 }
 
+func TestSudoSwitch(t *testing.T) {
+	if got := sudoSwitch(User{Username: "9cfcba08aa"}); got != "9cfcba08aa@agency_client" {
+		t.Fatalf("got %q", got)
+	}
+	if got := sudoSwitch(User{Username: "someone@manager_client"}); got != "someone@manager_client" {
+		t.Fatalf("ready switch must be kept: %q", got)
+	}
+	if got := sudoSwitch(User{}); got != "" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestNewRequiresAccount(t *testing.T) {
 	if New(Config{Zaley: zaleycash.New("http://x", "s", time.Second)}) != nil {
 		t.Fatal("expected nil without account name")

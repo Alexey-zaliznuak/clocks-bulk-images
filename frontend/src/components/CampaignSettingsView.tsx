@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { type AdCampaign } from "../api";
 import PadsTree from "./PadsTree";
+import VKLink from "./VKLink";
 import { type PadNode } from "../padsTree";
+import { type VKCabinet } from "../vkCabinet";
 import { defaultVKSettings } from "../vkSettings";
 
 type SettingsTab = "campaign" | "group" | "ads" | "generation";
@@ -12,11 +14,13 @@ export default function CampaignSettingsView({
   padTrees,
   padsLoading,
   padsError,
+  cabinet = null,
 }: {
   campaign: AdCampaign;
   padTrees: PadNode[];
   padsLoading?: boolean;
   padsError?: string;
+  cabinet?: VKCabinet | null;
 }) {
   const [tab, setTab] = useState<SettingsTab>("campaign");
   const [listTab, setListTab] = useState<ListTab>("names");
@@ -52,7 +56,15 @@ export default function CampaignSettingsView({
               <Field label="Ограничение ставки, ₽" value={vk.maxPrice == null ? "не задано" : String(vk.maxPrice)} />
             </div>
             <Field label="REF-метки" value={vk.refTags || "—"} />
-            <Field label="ID кампании ВКР" value={campaign.vkAdPlanId || "ещё не создана"} />
+            <div>
+              <span className="mb-1 block text-xs text-slate-500">ID кампании ВКР</span>
+              <VKLink
+                cabinet={cabinet}
+                planId={campaign.vkAdPlanId}
+                fallback="ещё не создана"
+                className="text-sm"
+              />
+            </div>
             {campaign.vkUploadError && <Field label="Ошибка загрузки в ВКР" value={campaign.vkUploadError} multiline />}
             <p className="text-xs text-slate-500">Дата показа — с даты создания кампании, без даты окончания.</p>
             <hr className="border-slate-200" />

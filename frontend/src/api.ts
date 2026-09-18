@@ -266,6 +266,9 @@ export const api = {
 
   models: () => request<{ models: VideoModel[]; defaultModel: string }>("/api/models"),
 
+  vkAdsCabinet: () =>
+    request<{ configured: boolean; baseUrl?: string; sudo?: string }>("/api/vk-ads/cabinet"),
+
   vkAdsPads: (targetAction?: string) =>
     request<{
       configured: boolean;

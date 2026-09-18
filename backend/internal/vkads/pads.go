@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -164,34 +165,42 @@ func convertNode(raw rawPadNode, leafIDsArePads bool) PadNode {
 	}
 }
 
-// ResolvePads keeps only ids from the package PadsTree. Package.pads_tree_id
-// is the tree that targetings.pads must belong to; other trees and the mixed
+// ResolvePads keeps only ids the package sells. Package.pads_tree_id is the
+// tree that targetings.pads must belong to; other trees and the mixed
 // packages_pads list are rejected as "not permitted in this pad tree".
+// An empty selection means the VK feed, never "wherever VK feels like": an
+// omitted targetings.pads lets the cabinet spend the budget on every placement
+// of the package.
 func ResolvePads(selected []int, pkg Package, trees []PadNode) []int {
-	allowed := CollectPadIDs(padsTreeForPackage(pkg, trees))
+	tree := padsTreeForPackage(pkg, trees)
+	allowed := intSet(append(CollectPadIDs(tree), PackagePadIDs(pkg)...))
 	if len(allowed) == 0 {
 		return nil
 	}
-	allowedSet := intSet(allowed)
-	want := selected
-	if len(want) == 0 {
-		want = PickVKFeedPadIDs(padsTreeForPackage(pkg, trees))
+	if out := intersectPadIDs(selected, allowed); len(out) > 0 {
+		return out
 	}
-	out := intersectPadIDs(want, allowedSet)
-	if len(out) == 0 {
-		out = intersectPadIDs(PickVKFeedPadIDs(padsTreeForPackage(pkg, trees)), allowedSet)
+	feed := PickVKFeedPadIDs(tree)
+	if len(feed) == 0 {
+		// The package tree can be missing from the first page of pads_trees;
+		// the feed of the whole cabinet is still narrowed by allowed.
+		feed = PickVKFeedPadIDs(trees)
 	}
-	return out
+	return intersectPadIDs(feed, allowed)
 }
 
-// ParsePackageDefaultPads reads options.targetings[pads] — the placements the
-// cabinet offers for this package, with "default" preselected.
-func ParsePackageDefaultPads(raw json.RawMessage) []int {
-	values, defaults := ParsePackagePadOptions(raw)
-	if len(defaults) > 0 {
-		return defaults
+// PackagePadIDs lists every placement the package describes in its options,
+// whether as plain values, as the cabinet preselection or as the per-pad
+// pattern allow-list.
+func PackagePadIDs(pkg Package) []int {
+	values, defaults := ParsePackagePadOptions(pkg.Options)
+	ids := append(append([]int(nil), values...), defaults...)
+	fromPatterns := make([]int, 0, len(ParsePackagePadPatterns(pkg.Options)))
+	for pad := range ParsePackagePadPatterns(pkg.Options) {
+		fromPatterns = append(fromPatterns, pad)
 	}
-	return values
+	sort.Ints(fromPatterns)
+	return uniqueInts(append(ids, fromPatterns...))
 }
 
 // ParsePackagePadOptions splits options.targetings[pads] into every placement

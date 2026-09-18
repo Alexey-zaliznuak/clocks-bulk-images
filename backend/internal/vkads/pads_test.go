@@ -96,16 +96,63 @@ func TestResolvePadsUsesPackageTreeOnly(t *testing.T) {
 	}
 }
 
-func TestParsePackageDefaultPads(t *testing.T) {
-	got := ParsePackageDefaultPads([]byte(`{"targetings":[{"name":"geo"},{"name":"pads","default":[102641,1265106],"values":[102641,1265106,111756]}]}`))
-	if len(got) != 2 || got[0] != 102641 || got[1] != 1265106 {
+func TestParsePackagePadOptionsSkipsOtherTargetings(t *testing.T) {
+	values, defaults := ParsePackagePadOptions([]byte(`{"targetings":[{"name":"geo","values":[1]},{"name":"pads","default":[102641,1265106],"values":[102641,1265106,111756]}]}`))
+	if len(values) != 3 || len(defaults) != 2 || defaults[1] != 1265106 {
+		t.Fatalf("values=%v defaults=%v", values, defaults)
+	}
+}
+
+// cabinetVKTree mirrors the "ВКонтакте" branch of the live cabinet: the feed
+// sits next to in-video, stories, mini apps and the sidebar.
+func cabinetVKTree() []PadNode {
+	return []PadNode{{ID: "27", Name: "Социальные сети и сервисы", Children: []PadNode{
+		{ID: "Вконтакте_1", Name: "ВКонтакте", Children: []PadNode{
+			{ID: "1265106_2", Name: "Лента", Pads: []int{1265106}},
+			{ID: "1010345_3", Name: "В видео", Pads: []int{1010345}},
+			{ID: "2243453_4", Name: "В историях", Pads: []int{2243453}},
+			{ID: "2243456_5", Name: "В VK Mini Apps и играх с вознаграждением за просмотр (rewarded)", Pads: []int{2243456}},
+			{ID: "1361696_6", Name: "В VK Mini Apps и играх перед загрузкой или при смене контента", Pads: []int{1361696}},
+			{ID: "1985149_7", Name: "В VK Mini Apps и играх рядом с контентом", Pads: []int{1985149}},
+			{ID: "1302973_8", Name: "Боковая колонка", Pads: []int{1302973}},
+		}},
+	}}}
+}
+
+func TestResolvePadsDefaultsToFeed(t *testing.T) {
+	pkg := Package{ID: 3122, PadsTreeID: 27}
+	got := ResolvePads(nil, pkg, cabinetVKTree())
+	if len(got) != 1 || got[0] != 1265106 {
+		t.Fatalf("empty selection must mean the VK feed, got %v", got)
+	}
+}
+
+func TestResolvePadsKeepsExplicitSelection(t *testing.T) {
+	pkg := Package{ID: 3122, PadsTreeID: 27}
+	got := ResolvePads([]int{1010345, 999}, pkg, cabinetVKTree())
+	if len(got) != 1 || got[0] != 1010345 {
 		t.Fatalf("got %v", got)
 	}
 }
 
-func TestParsePackageDefaultPadsFallsBackToValues(t *testing.T) {
-	got := ParsePackageDefaultPads([]byte(`{"targetings":[{"name":"pads","values":[111756]}]}`))
-	if len(got) != 1 || got[0] != 111756 {
+func TestResolvePadsFallsBackToCabinetFeedWhenTreeMissing(t *testing.T) {
+	// The package tree is past the first page of pads_trees, so only the
+	// per-pad pattern map tells us which placements the package sells.
+	pkg := Package{
+		ID:         3122,
+		PadsTreeID: 999,
+		Options:    []byte(`{"targetings":[{"name":"pads","patterns":[{"pad":"1265106","patterns":[{"id":486}]},{"pad":"1010345","patterns":[{"id":145}]}]}]}`),
+	}
+	got := ResolvePads(nil, pkg, cabinetVKTree())
+	if len(got) != 1 || got[0] != 1265106 {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestPackagePadIDsReadsPatternMap(t *testing.T) {
+	pkg := Package{Options: []byte(`{"targetings":[{"name":"pads","patterns":[{"pad":"1265106","patterns":[{"id":486}]},{"pad":"1010345","patterns":[{"id":145}]}]}]}`)}
+	got := PackagePadIDs(pkg)
+	if len(got) != 2 || got[0] != 1010345 || got[1] != 1265106 {
 		t.Fatalf("got %v", got)
 	}
 }

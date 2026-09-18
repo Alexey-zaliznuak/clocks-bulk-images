@@ -81,6 +81,12 @@ type Config struct {
 	ZaleyAccountName string
 	ZaleyBaseURL     string
 	VKAdsBaseURL     string
+	// VKAdsCabinetURL is where the browser UI lives, which is a different host
+	// from the API one.
+	VKAdsCabinetURL string
+	// VKAdsSudo overrides the cabinet switch the agency links carry. Empty
+	// means "derive it from the account behind the token".
+	VKAdsSudo string
 	// ZaleyTokenRefreshSkew is how early a cached token is treated as expired.
 	ZaleyTokenRefreshSkew time.Duration
 }
@@ -134,6 +140,8 @@ func Load() *Config {
 		ZaleyAccountName:      env("ZALEY_ACCOUNT_NAME", ""),
 		ZaleyBaseURL:          env("ZALEY_BASE_URL", "https://zaleycash.com"),
 		VKAdsBaseURL:          env("VK_ADS_BASE_URL", "https://ads.vk.com"),
+		VKAdsCabinetURL:       env("VK_ADS_CABINET_URL", "https://ads.vk.ru"),
+		VKAdsSudo:             env("VK_ADS_SUDO", ""),
 		ZaleyTokenRefreshSkew: time.Duration(envInt("ZALEY_TOKEN_REFRESH_SKEW_SECONDS", 120)) * time.Second,
 	}
 	return c

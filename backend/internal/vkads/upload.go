@@ -3,6 +3,7 @@ package vkads
 import (
 	"context"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -38,18 +39,17 @@ func (s *Service) ResolveCatalog(ctx context.Context, settings Settings, created
 		return nil, err
 	}
 	pads := ResolvePads(settings.Pads, *pkg, trees)
-	if len(pads) == 0 && pkg.PadsTreeID == 0 {
+	if len(pads) == 0 {
 		listed, err := s.ListPackagePads(ctx, pkg.ID)
 		if err != nil {
 			return nil, err
 		}
 		pads = intersectPadIDs(orPadIDs(settings.Pads, PickVKFeedPads(listed)), intSet(padIDs(listed)))
 	}
-	if allowed := ParsePackageDefaultPads(pkg.Options); len(allowed) > 0 {
-		if narrowed := intersectPadIDs(orPadIDs(pads, allowed), intSet(allowed)); len(narrowed) > 0 {
-			pads = narrowed
-		}
+	if len(pads) == 0 {
+		return nil, fmt.Errorf("vkads: не нашли ленту ВК среди площадок пакета %d — выберите места размещения вручную", pkg.ID)
 	}
+	log.Printf("vkads пакет %d: площадки %v", pkg.ID, pads)
 	communityURL := fmt.Sprintf("https://vk.com/club%d", settings.CommunityID)
 	if tags := strings.TrimSpace(settings.RefTags); tags != "" {
 		communityURL += "?" + strings.TrimPrefix(tags, "?")

@@ -103,6 +103,7 @@ func (s *Server) Router() http.Handler {
 		pr.Get("/api/config", s.handleConfig)
 		pr.Get("/api/vk-ads/status", s.handleVKAdsStatus)
 		pr.Get("/api/vk-ads/pads", s.handleVKAdsPads)
+		pr.Get("/api/vk-ads/cabinet", s.handleVKAdsCabinet)
 		pr.Get("/api/models", s.handleModels)
 		pr.Post("/api/tasks/batch", s.handleCreateBatch)
 		pr.Get("/api/tasks", s.handleListTasks)
@@ -198,6 +199,27 @@ func (s *Server) handleVKAdsStatus(w http.ResponseWriter, r *http.Request) {
 		"ok":          true,
 		"accountName": s.vkads.AccountName(),
 		"user":        user,
+	})
+}
+
+// handleVKAdsCabinet hands the UI what it needs to link an uploaded campaign
+// into the cabinet. The sudo switch is the reason this is a request and not a
+// constant: it names the account behind the agency token.
+func (s *Server) handleVKAdsCabinet(w http.ResponseWriter, r *http.Request) {
+	if s.vkads == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"configured": false})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	cabinet, err := s.vkads.CabinetLinks(ctx)
+	if err != nil {
+		log.Printf("api: vk ads cabinet: %v", err)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"configured": true,
+		"baseUrl":    cabinet.BaseURL,
+		"sudo":       cabinet.Sudo,
 	})
 }
 

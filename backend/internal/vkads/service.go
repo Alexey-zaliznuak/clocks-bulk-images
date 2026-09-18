@@ -22,15 +22,22 @@ const (
 	defaultSkew     = 2 * time.Minute
 	catalogTTL      = time.Hour
 	vkMinRequestGap = 400 * time.Millisecond
+	// defaultCabinetURL is the browser host; the API answers on another one.
+	defaultCabinetURL = "https://ads.vk.ru"
+	// agencyClientSuffix is how the cabinet names the "agency looking at its
+	// client" relation in the sudo switch.
+	agencyClientSuffix = "agency_client"
 )
 
 // Service mints and caches the VK Ads token for one ZaleyCash cabinet, then
 // signs requests to ads.vk.com with it.
 type Service struct {
-	zaley   *zaleycash.Client
-	account string
-	adsURL  string
-	skew    time.Duration
+	zaley      *zaleycash.Client
+	account    string
+	adsURL     string
+	cabinetURL string
+	sudo       string
+	skew       time.Duration
 	http       *http.Client
 	uploadHTTP *http.Client
 	now        func() time.Time
@@ -50,6 +57,8 @@ type Service struct {
 	padsAt        time.Time
 	patterns      []BannerPattern
 	patternsAt    time.Time
+	user          *User
+	userAt        time.Time
 	nextOK        time.Time
 }
 
@@ -67,6 +76,12 @@ type Config struct {
 	Zaley       *zaleycash.Client
 	AccountName string
 	AdsBaseURL  string
+	// CabinetURL is the browser host of the cabinet, used to link an uploaded
+	// campaign from our UI. Empty falls back to ads.vk.ru.
+	CabinetURL string
+	// Sudo overrides the cabinet switch of the agency links. Empty derives it
+	// from the account the token belongs to.
+	Sudo        string
 	RefreshSkew time.Duration
 	HTTPTimeout time.Duration
 	Now         func() time.Time
@@ -91,11 +106,17 @@ func New(cfg Config) *Service {
 	if now == nil {
 		now = time.Now
 	}
+	cabinet := strings.TrimRight(strings.TrimSpace(cfg.CabinetURL), "/")
+	if cabinet == "" {
+		cabinet = defaultCabinetURL
+	}
 	return &Service{
-		zaley:   cfg.Zaley,
-		account: account,
-		adsURL:  strings.TrimRight(cfg.AdsBaseURL, "/"),
-		skew:    skew,
+		zaley:      cfg.Zaley,
+		account:    account,
+		adsURL:     strings.TrimRight(cfg.AdsBaseURL, "/"),
+		cabinetURL: cabinet,
+		sudo:       strings.TrimSpace(cfg.Sudo),
+		skew:       skew,
 		http:       &http.Client{Timeout: timeout},
 		uploadHTTP: &http.Client{Timeout: 10 * time.Minute},
 		now:        now,
@@ -177,6 +198,57 @@ type User struct {
 	ID       json.Number `json:"id"`
 	Username string      `json:"username"`
 	Types    []string    `json:"types"`
+}
+
+// Cabinet describes how to open this account in a browser.
+type Cabinet struct {
+	BaseURL string `json:"baseUrl"`
+	Sudo    string `json:"sudo,omitempty"`
+}
+
+// CabinetLinks returns the browser entry point of the account behind the token.
+// Agency links only resolve with the sudo switch: without it the cabinet drops
+// the visitor on its own dashboard instead of the client's campaign.
+func (s *Service) CabinetLinks(ctx context.Context) (Cabinet, error) {
+	out := Cabinet{BaseURL: s.cabinetURL, Sudo: s.sudo}
+	if out.Sudo != "" {
+		return out, nil
+	}
+	user, err := s.cachedUser(ctx)
+	if err != nil {
+		return out, err
+	}
+	out.Sudo = sudoSwitch(*user)
+	return out, nil
+}
+
+// sudoSwitch builds the "who am I looking at" part of a cabinet link. An
+// agency sees a client account as "<username>@agency_client"; the username is
+// the opaque handle user.json reports, not the cabinet title.
+func sudoSwitch(u User) string {
+	name := strings.TrimSpace(u.Username)
+	if name == "" || strings.Contains(name, "@") {
+		return name
+	}
+	return name + "@" + agencyClientSuffix
+}
+
+func (s *Service) cachedUser(ctx context.Context) (*User, error) {
+	s.mu.Lock()
+	if s.user != nil && s.now().Sub(s.userAt) < catalogTTL {
+		user := *s.user
+		s.mu.Unlock()
+		return &user, nil
+	}
+	s.mu.Unlock()
+	user, err := s.CurrentUser(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	s.user, s.userAt = user, s.now()
+	s.mu.Unlock()
+	return user, nil
 }
 
 // CurrentUser checks that the token can sign ads.vk.com requests.

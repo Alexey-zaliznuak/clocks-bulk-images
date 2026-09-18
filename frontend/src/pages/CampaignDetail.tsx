@@ -3,8 +3,10 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, type AdCampaign, type AdCampaignItem } from "../api";
 import ConfirmDialog from "../components/ConfirmDialog";
 import CampaignSettingsView from "../components/CampaignSettingsView";
+import VKLink from "../components/VKLink";
 import { formatRub, formatUsd } from "../format";
 import { type PadNode } from "../padsTree";
+import { type VKCabinet } from "../vkCabinet";
 import { statusClasses, statusLabel } from "../status";
 import { isVKUpload, lifecycleClasses, lifecycleLabel } from "./Campaigns";
 
@@ -32,6 +34,7 @@ export default function CampaignDetail() {
   const [ignoring, setIgnoring] = useState(false);
   const [message, setMessage] = useState("");
   const [padTrees, setPadTrees] = useState<PadNode[]>([]);
+  const [cabinet, setCabinet] = useState<VKCabinet | null>(null);
 
   const loadCampaign = useCallback(async () => {
     try {
@@ -75,6 +78,12 @@ export default function CampaignDetail() {
       .then((res) => setPadTrees(res.trees || []))
       .catch(() => {});
   }, [campaign?.vkSettings?.targetAction]);
+
+  useEffect(() => {
+    api.vkAdsCabinet()
+      .then((res) => setCabinet(res.configured ? { baseUrl: res.baseUrl, sudo: res.sudo } : null))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (campaign?.lifecycle !== "running" && !isVKUpload(campaign?.lifecycle || "")) return;
@@ -185,7 +194,9 @@ export default function CampaignDetail() {
       <header className="flex flex-wrap items-center gap-3">
         <Link to="/campaigns" className="text-sm text-slate-500 hover:text-blue-600">← К кампаниям</Link>
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-xl font-bold text-slate-900">{campaign.title}</h1>
+          <h1 className="truncate text-xl font-bold text-slate-900">
+            <VKLink cabinet={cabinet} planId={campaign.vkAdPlanId} label={campaign.title} className="text-slate-900" />
+          </h1>
           <p className="mt-0.5 text-xs text-slate-500">{new Date(campaign.createdAt).toLocaleString("ru-RU")}</p>
         </div>
         <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${lifecycleClasses(campaign.lifecycle)}`}>
@@ -260,6 +271,7 @@ export default function CampaignDetail() {
       <CampaignSettingsView
         campaign={campaign}
         padTrees={padTrees}
+        cabinet={cabinet}
       />
 
       <section className="space-y-3">
@@ -336,8 +348,17 @@ export default function CampaignDetail() {
                     <td className="px-4 py-3 text-xs text-slate-600">
                       {item.audienceName || (item.audienceId ? String(item.audienceId) : "—")}
                     </td>
-                    <td className="px-4 py-3 text-xs text-slate-600">{item.vkAdGroupId || "—"}</td>
-                    <td className="px-4 py-3 text-xs text-slate-600">{item.vkBannerId || "—"}</td>
+                    <td className="px-4 py-3 text-xs text-slate-600">
+                      <VKLink cabinet={cabinet} planId={campaign.vkAdPlanId} groupId={item.vkAdGroupId} />
+                    </td>
+                    <td className="px-4 py-3 text-xs text-slate-600">
+                      <VKLink
+                        cabinet={cabinet}
+                        planId={campaign.vkAdPlanId}
+                        groupId={item.vkAdGroupId}
+                        adId={item.vkBannerId}
+                      />
+                    </td>
                     <DownloadCell url={item.imageDownloadUrl} label="Скачать картинку" />
                     <DownloadCell url={item.sourceDownloadUrl} label="Скачать исходное видео" />
                     <DownloadCell url={item.videoDownloadUrl} label="Скачать преобразованное видео" />

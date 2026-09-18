@@ -68,6 +68,8 @@ func main() {
 			Zaley:       zaleycash.New(cfg.ZaleyBaseURL, cfg.ZaleySecret, 30*time.Second),
 			AccountName: cfg.ZaleyAccountName,
 			AdsBaseURL:  cfg.VKAdsBaseURL,
+			CabinetURL:  cfg.VKAdsCabinetURL,
+			Sudo:        cfg.VKAdsSudo,
 			RefreshSkew: cfg.ZaleyTokenRefreshSkew,
 		})
 		log.Printf("vkads: ZaleyCash cabinet %q configured", cfg.ZaleyAccountName)
