@@ -28,7 +28,7 @@ func TestMatchAudienceExactCaseInsensitive(t *testing.T) {
 	}
 }
 
-func TestMatchAudiencePrefersExactThenAudiencePrefix(t *testing.T) {
+func TestMatchAudiencePrefersExactThenSubstring(t *testing.T) {
 	older := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	newer := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
 	both := []Segment{
@@ -48,8 +48,9 @@ func TestMatchAudiencePrefersExactThenAudiencePrefix(t *testing.T) {
 	if got == nil || got.ID != 4 {
 		t.Fatalf("fallback Аудитория Аркадий = %#v", got)
 	}
-	if MatchAudience("Гущин", onlyPrefixed) != nil {
-		t.Fatal("Аудитория Гущинов is not Аудитория Гущин")
+	got = MatchAudience("Гущин", onlyPrefixed)
+	if got == nil || got.ID != 5 {
+		t.Fatalf("Аудитория Гущинов must match Гущин, got %#v", got)
 	}
 }
 

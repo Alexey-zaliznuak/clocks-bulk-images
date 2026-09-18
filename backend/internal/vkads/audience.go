@@ -12,7 +12,8 @@ type Segment struct {
 	Created time.Time `json:"-"`
 }
 
-// MatchAudience finds a segment by exact name first, then «Аудитория {name}».
+// MatchAudience finds a segment by exact name first, then any name that
+// contains the value (so «Аудитория Гущинов» matches «Гущин»).
 // Letter case and surrounding spaces are ignored. If several match, the newest wins.
 func MatchAudience(value string, items []Segment) *Segment {
 	want := strings.ToLower(strings.TrimSpace(value))
@@ -22,7 +23,15 @@ func MatchAudience(value string, items []Segment) *Segment {
 	if found := matchAudienceName(want, items); found != nil {
 		return found
 	}
-	return matchAudienceName("аудитория "+want, items)
+	var best *Segment
+	for i := range items {
+		name := strings.ToLower(strings.TrimSpace(items[i].Name))
+		if !strings.Contains(name, want) {
+			continue
+		}
+		best = newerSegment(best, &items[i])
+	}
+	return best
 }
 
 func matchAudienceName(want string, items []Segment) *Segment {
