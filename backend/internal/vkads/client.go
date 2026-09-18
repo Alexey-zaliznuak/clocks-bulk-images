@@ -245,7 +245,7 @@ func (s *Service) ListPackages(ctx context.Context) ([]Package, error) {
 	seen := map[int64]struct{}{}
 	for pages, offset := 0, 0; ; pages++ {
 		env, err := s.getListQuery(ctx, "/api/v2/packages.json", offset, listPageSize, url.Values{
-			"fields": {"id,name,objective,priced_goal,description,pads_tree_id,options"},
+			"fields": {"id,name,objective,description,pads_tree_id,options,banner_format_id,format,priced_event_type"},
 		})
 		if err != nil {
 			if len(all) > 0 {
