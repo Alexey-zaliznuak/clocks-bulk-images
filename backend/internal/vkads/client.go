@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -398,6 +399,42 @@ func (s *Service) CreateAdPlan(ctx context.Context, body map[string]any) (int64,
 		return 0, nil, err
 	}
 	return parseCreatePlan(data)
+}
+
+// planGroupKeys are the two names an ad_plan accepts its nested groups under.
+// The resource documents ad_groups, but the live cabinet answers
+// "campaigns: Empty value", so that spelling goes first.
+var planGroupKeys = []string{"campaigns", "ad_groups"}
+
+// CreateAdPlanWithGroups posts a plan together with its groups. A plan is never
+// created empty: ad_plans.json rejects one without groups outright.
+func (s *Service) CreateAdPlanWithGroups(ctx context.Context, plan map[string]any, groups []map[string]any) (int64, []CreatedGroup, error) {
+	var err error
+	for i, key := range planGroupKeys {
+		var id int64
+		var created []CreatedGroup
+		id, created, err = s.CreateAdPlan(ctx, AttachGroups(plan, groups, key))
+		if err == nil {
+			return id, created, nil
+		}
+		// Only the cabinet disagreeing about the key is worth another call;
+		// a rejected banner would fail the same way twice.
+		if i == len(planGroupKeys)-1 || !mentionsOtherGroupKey(err, key) {
+			return 0, nil, err
+		}
+		log.Printf("vkads ad_plan: %s rejected, retrying with %s", key, planGroupKeys[i+1])
+	}
+	return 0, nil, err
+}
+
+func mentionsOtherGroupKey(err error, used string) bool {
+	msg := strings.ToLower(err.Error())
+	for _, key := range planGroupKeys {
+		if key != used && strings.Contains(msg, key) {
+			return true
+		}
+	}
+	return false
 }
 
 func parseCreatePlan(data []byte) (int64, []CreatedGroup, error) {

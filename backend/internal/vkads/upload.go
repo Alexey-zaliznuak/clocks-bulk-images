@@ -94,16 +94,19 @@ func PlanBody(name string, settings Settings, cat *Catalog) map[string]any {
 	return body
 }
 
-// AttachCampaigns nests groups into an ad_plan create call. The AdPlans
-// resource documents the key as ad_groups; some cabinets answer to campaigns,
-// which CreateAdPlan retries with.
-func AttachCampaigns(plan map[string]any, groups []map[string]any) map[string]any {
+// AttachGroups nests groups into an ad_plan create call under the given key,
+// returning a copy so the same plan can be retried under the other spelling.
+func AttachGroups(plan map[string]any, groups []map[string]any, key string) map[string]any {
+	body := make(map[string]any, len(plan)+1)
+	for k, v := range plan {
+		body[k] = v
+	}
 	list := make([]any, 0, len(groups))
 	for _, group := range groups {
 		list = append(list, group)
 	}
-	plan["ad_groups"] = list
-	return plan
+	body[key] = list
+	return body
 }
 
 func NestedGroupBody(name string, audienceID int64, settings Settings, cat *Catalog) map[string]any {

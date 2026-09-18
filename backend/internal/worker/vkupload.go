@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 
 	"named_clocks/backend/internal/adcampaign"
 	"named_clocks/backend/internal/store"
@@ -165,27 +164,12 @@ func (w *Worker) doVKUpload(ctx context.Context, campaign *store.AdCampaign) err
 }
 
 func (w *Worker) createAdPlan(ctx context.Context, campaign *store.AdCampaign, settings vkads.Settings, cat *vkads.Catalog, items []*store.AdCampaignItem) (int64, []vkads.CreatedGroup, error) {
-	planID, created, err := w.vkads.CreateAdPlan(ctx, vkads.PlanBody(campaign.Title, settings, cat))
-	if err == nil {
-		return planID, created, nil
-	}
-	if !adPlanNeedsGroups(err) {
-		return 0, nil, err
-	}
 	groups := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		groups = append(groups, vkads.NestedGroupBody(item.Value, item.AudienceID, settings, cat))
 	}
-	log.Printf("worker: vk upload %s: ad_plan requires groups, retry with %d groups", campaign.ID, len(groups))
-	return w.vkads.CreateAdPlan(ctx, vkads.AttachCampaigns(vkads.PlanBody(campaign.Title, settings, cat), groups))
-}
-
-func adPlanNeedsGroups(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "ad_groups") || strings.Contains(msg, "campaigns")
+	log.Printf("worker: vk upload %s: ad_plan with %d groups", campaign.ID, len(groups))
+	return w.vkads.CreateAdPlanWithGroups(ctx, vkads.PlanBody(campaign.Title, settings, cat), groups)
 }
 
 func (w *Worker) saveCreatedGroups(ctx context.Context, items []*store.AdCampaignItem, created []vkads.CreatedGroup) error {

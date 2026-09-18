@@ -51,10 +51,13 @@ func TestPlanBodyBudgetStringWhenOptimized(t *testing.T) {
 	if _, ok := group["autobidding_mode"]; ok {
 		t.Fatal("optimized group must inherit autobidding_mode from the plan")
 	}
-	AttachCampaigns(body, []map[string]any{group})
-	list, _ := body["ad_groups"].([]any)
+	withGroups := AttachGroups(body, []map[string]any{group}, "campaigns")
+	list, _ := withGroups["campaigns"].([]any)
 	if len(list) != 1 {
-		t.Fatalf("ad_groups = %#v", body["ad_groups"])
+		t.Fatalf("campaigns = %#v", withGroups["campaigns"])
+	}
+	if _, ok := body["campaigns"]; ok {
+		t.Fatal("AttachGroups must not mutate the plan it is given")
 	}
 }
 
