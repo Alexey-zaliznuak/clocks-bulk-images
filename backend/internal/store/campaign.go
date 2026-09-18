@@ -526,7 +526,7 @@ func (s *Store) SetAdCampaignItemBannerID(ctx context.Context, id, bannerID stri
 
 func (s *Store) ListUploadableAdCampaignItems(ctx context.Context, campaignID string) ([]*AdCampaignItem, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT i.id,i.campaign_id,i.kind,i.value,i.status,i.audience_id,i.audience_name,
-		i.vk_ad_group_id,i.vk_banner_id,i.video_object,i.source_video_object,c.name_text_template,c.surname_text_template
+		i.vk_ad_group_id,i.vk_banner_id,i.video_object,i.source_video_object,i.image_object,c.name_text_template,c.surname_text_template
 		FROM ad_campaign_items i JOIN ad_campaigns c ON c.id=i.campaign_id
 		WHERE i.campaign_id=$1 AND i.status='done' AND i.audience_id<>0 ORDER BY i.position,i.id`, campaignID)
 	if err != nil {
@@ -536,7 +536,7 @@ func (s *Store) ListUploadableAdCampaignItems(ctx context.Context, campaignID st
 	var out []*AdCampaignItem
 	for rows.Next() {
 		var i AdCampaignItem
-		if err := rows.Scan(&i.ID, &i.CampaignID, &i.Kind, &i.Value, &i.Status, &i.AudienceID, &i.AudienceName, &i.VKAdGroupID, &i.VKBannerID, &i.VideoObject, &i.SourceVideoObject, &i.NameTextTemplate, &i.SurnameTextTemplate); err != nil {
+		if err := rows.Scan(&i.ID, &i.CampaignID, &i.Kind, &i.Value, &i.Status, &i.AudienceID, &i.AudienceName, &i.VKAdGroupID, &i.VKBannerID, &i.VideoObject, &i.SourceVideoObject, &i.ImageObject, &i.NameTextTemplate, &i.SurnameTextTemplate); err != nil {
 			return nil, err
 		}
 		out = append(out, &i)

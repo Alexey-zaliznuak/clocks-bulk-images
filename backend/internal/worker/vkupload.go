@@ -46,11 +46,6 @@ func (w *Worker) doVKUpload(ctx context.Context, campaign *store.AdCampaign) err
 	if err != nil {
 		return err
 	}
-	patterns, err := w.vkads.ListBannerPatterns(ctx)
-	if err != nil {
-		log.Printf("worker: vk upload %s: banner_patterns: %v", campaign.ID, err)
-	}
-
 	banners := make([]map[string]any, len(items))
 	for i, item := range items {
 		if item.VKBannerID != "" {
@@ -58,7 +53,7 @@ func (w *Worker) doVKUpload(ctx context.Context, campaign *store.AdCampaign) err
 		}
 		_ = w.store.TouchAdCampaign(ctx, campaign.ID)
 		log.Printf("worker: vk upload %s: upload video %s", campaign.ID, item.Value)
-		banner, err := w.prepareBanner(ctx, item, settings, cat, patterns)
+		banner, err := w.prepareBanner(ctx, item, settings, cat)
 		if err != nil {
 			return fmt.Errorf("видео %q: %w", item.Value, err)
 		}
@@ -181,7 +176,7 @@ func firstID(ids []int64) int64 {
 	return ids[0]
 }
 
-func (w *Worker) prepareBanner(ctx context.Context, item *store.AdCampaignItem, settings vkads.Settings, cat *vkads.Catalog, patterns []vkads.BannerPattern) (map[string]any, error) {
+func (w *Worker) prepareBanner(ctx context.Context, item *store.AdCampaignItem, settings vkads.Settings, cat *vkads.Catalog) (map[string]any, error) {
 	video := item.VideoObject
 	if video == "" {
 		video = item.SourceVideoObject
@@ -210,24 +205,59 @@ func (w *Worker) prepareBanner(ctx context.Context, item *store.AdCampaignItem, 
 		return nil, err
 	}
 	defer f.Close()
-	contentID, err := w.vkads.UploadVideo(ctx, item.Value+".mp4", f, info.Width, info.Height)
+	videoID, err := w.vkads.UploadVideo(ctx, item.Value+".mp4", f, info.Width, info.Height)
 	if err != nil {
 		return nil, fmt.Errorf("загрузить видео: %w", err)
+	}
+	role := vkads.VideoRole(info.Width, info.Height)
+	pattern := vkads.PickPackageBannerPattern(cat.Patterns, role, item.ImageObject != "")
+	if pattern == nil {
+		return nil, fmt.Errorf("в пакете нет паттерна объявления")
+	}
+	log.Printf("worker: vk upload banner %s: pattern %d %s", item.Value, pattern.ID, pattern.Name)
+	var imageID int64
+	if vkads.PatternNeedsImage(pattern) && item.ImageObject != "" {
+		id, err := w.uploadBannerImage(ctx, item)
+		if err != nil {
+			return nil, fmt.Errorf("загрузить картинку: %w", err)
+		}
+		imageID = id
 	}
 	text := item.NameTextTemplate
 	if item.Kind == "surname" {
 		text = item.SurnameTextTemplate
 	}
-	role := vkads.VideoRole(info.Width, info.Height)
 	return vkads.BannerBody(
 		item.Value,
 		0,
 		cat.URLID,
-		contentID,
+		videoID,
+		imageID,
 		settings.BannerTitle,
 		adcampaign.RenderNameText(text, item.Value),
 		vkads.CommunityCTA(settings.TargetAction),
-		role,
-		vkads.PickVideoBannerPattern(patterns, role),
+		pattern,
 	), nil
+}
+
+func (w *Worker) uploadBannerImage(ctx context.Context, item *store.AdCampaignItem) (int64, error) {
+	dir, err := os.MkdirTemp(w.ffmpeg.TempDir(), "vk-image-*")
+	if err != nil {
+		return 0, err
+	}
+	defer os.RemoveAll(dir)
+	local := filepath.Join(dir, "ad.jpg")
+	if err := w.fetchToFile(ctx, item.ImageObject, local); err != nil {
+		return 0, err
+	}
+	width, height := 1080, 1080
+	if info, err := w.ffmpeg.Probe(ctx, local); err == nil && info.Width > 0 {
+		width, height = info.Width, info.Height
+	}
+	f, err := os.Open(local)
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+	return w.vkads.UploadStatic(ctx, item.Value+".jpg", f, width, height)
 }

@@ -163,12 +163,14 @@ func (e *AudienceNotFoundError) Error() string {
 }
 
 type Package struct {
-	ID          int64      `json:"id"`
-	Name        string     `json:"name"`
-	Objective   textList   `json:"objective"`
-	PricedGoal  *PriceGoal `json:"priced_goal"`
-	Description string     `json:"description"`
-	PadsTreeID  int64      `json:"pads_tree_id"`
+	ID          int64           `json:"id"`
+	Name        string          `json:"name"`
+	Objective   textList        `json:"objective"`
+	PricedGoal  *PriceGoal      `json:"priced_goal"`
+	Description string          `json:"description"`
+	PadsTreeID  int64           `json:"pads_tree_id"`
+	Options     json.RawMessage `json:"options"`
+	PatternIDs  []int64         `json:"-"`
 }
 
 // textList accepts either "community" or ["community","socialengagement"].
@@ -242,7 +244,9 @@ func (s *Service) ListPackages(ctx context.Context) ([]Package, error) {
 	var all []Package
 	seen := map[int64]struct{}{}
 	for pages, offset := 0, 0; ; pages++ {
-		env, err := s.getList(ctx, "/api/v2/packages.json", offset, listPageSize)
+		env, err := s.getListQuery(ctx, "/api/v2/packages.json", offset, listPageSize, url.Values{
+			"fields": {"id,name,objective,priced_goal,description,pads_tree_id,options"},
+		})
 		if err != nil {
 			if len(all) > 0 {
 				break
@@ -264,6 +268,7 @@ func (s *Service) ListPackages(ctx context.Context) ([]Package, error) {
 				continue
 			}
 			seen[item.ID] = struct{}{}
+			item.PatternIDs = ParsePackagePatternIDs(item.Options)
 			all = append(all, item)
 			added++
 		}

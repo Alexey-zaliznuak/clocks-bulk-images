@@ -109,7 +109,10 @@ func TestParseCreateGroupReadsBanners(t *testing.T) {
 
 func TestAttachBanner(t *testing.T) {
 	group := NestedGroupBody("Аркадий", 77, testSettings(true, 999), testCatalog())
-	banner := BannerBody("Аркадий", 0, 9, 55, "title", "text", "contactUs", "video_vertical", nil)
+	banner := BannerBody("Аркадий", 0, 9, 55, 0, "title", "text", "contactUs", &BannerPattern{Format: []BannerSlot{
+		{Field: "url", Role: "primary"},
+		{Field: "content", Role: "video_vertical"},
+	}})
 	AttachBanner(group, banner)
 	if _, ok := banner["ad_group_id"]; ok {
 		t.Fatal("nested banner must not have ad_group_id")

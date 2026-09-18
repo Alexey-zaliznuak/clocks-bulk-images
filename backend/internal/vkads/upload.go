@@ -15,6 +15,7 @@ type Catalog struct {
 	Pads      []int
 	URLID     int64
 	DateStart string
+	Patterns  []BannerPattern
 }
 
 func (s *Service) ResolveCatalog(ctx context.Context, settings Settings, createdAt time.Time) (*Catalog, error) {
@@ -56,12 +57,17 @@ func (s *Service) ResolveCatalog(ctx context.Context, settings Settings, created
 	if start == "" {
 		start = createdAt.Format("2006-01-02")
 	}
+	patterns, err := s.ListPackagePatterns(ctx, *pkg)
+	if err != nil {
+		return nil, err
+	}
 	return &Catalog{
 		Package:   *pkg,
 		RussiaID:  russia,
 		Pads:      pads,
 		URLID:     urlID,
 		DateStart: start,
+		Patterns:  patterns,
 	}, nil
 }
 
