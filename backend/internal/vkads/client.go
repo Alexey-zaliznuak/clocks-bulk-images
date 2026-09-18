@@ -19,6 +19,8 @@ func (s *Service) Post(ctx context.Context, path string, body any) ([]byte, erro
 	return s.do(ctx, http.MethodPost, path, raw)
 }
 
+const listPageSize = 50
+
 type listEnvelope struct {
 	Count  int             `json:"count"`
 	Items  json.RawMessage `json:"items"`
@@ -27,7 +29,19 @@ type listEnvelope struct {
 }
 
 func (s *Service) getList(ctx context.Context, path string, offset, limit int) (listEnvelope, error) {
+	return s.getListQuery(ctx, path, offset, limit, nil)
+}
+
+func (s *Service) getListQuery(ctx context.Context, path string, offset, limit int, extra url.Values) (listEnvelope, error) {
 	q := url.Values{}
+	for key, values := range extra {
+		for _, value := range values {
+			q.Add(key, value)
+		}
+	}
+	if limit <= 0 || limit > listPageSize {
+		limit = listPageSize
+	}
 	q.Set("limit", strconv.Itoa(limit))
 	q.Set("offset", strconv.Itoa(offset))
 	data, err := s.Get(ctx, path+"?"+q.Encode())
@@ -72,7 +86,7 @@ func (s *Service) ListSegments(ctx context.Context) ([]Segment, error) {
 
 	var all []Segment
 	for offset := 0; ; {
-		env, err := s.getList(ctx, "/api/v2/remarketing/segments.json", offset, 100)
+		env, err := s.getList(ctx, "/api/v2/remarketing/segments.json", offset, listPageSize)
 		if err != nil {
 			return nil, err
 		}
@@ -144,60 +158,82 @@ type Pad struct {
 }
 
 func (s *Service) ListPackages(ctx context.Context) ([]Package, error) {
-	env, err := s.getList(ctx, "/api/v2/packages.json", 0, 200)
-	if err != nil {
-		return nil, err
-	}
-	var items []Package
-	if len(env.Items) > 0 {
-		if err := json.Unmarshal(env.Items, &items); err != nil {
-			return nil, fmt.Errorf("vkads packages: %w", err)
+	var all []Package
+	for offset := 0; ; {
+		env, err := s.getList(ctx, "/api/v2/packages.json", offset, listPageSize)
+		if err != nil {
+			return nil, err
 		}
+		var page []Package
+		if len(env.Items) > 0 {
+			if err := json.Unmarshal(env.Items, &page); err != nil {
+				return nil, fmt.Errorf("vkads packages: %w", err)
+			}
+		}
+		if len(page) == 0 {
+			break
+		}
+		all = append(all, page...)
+		if env.Count > 0 && len(all) >= env.Count {
+			break
+		}
+		offset += len(page)
 	}
-	return items, nil
+	return all, nil
 }
 
 func (s *Service) ListRegions(ctx context.Context) ([]Region, error) {
-	data, err := s.Get(ctx, "/api/v2/regions.json?limit=500")
-	if err != nil {
-		return nil, err
-	}
-	var env listEnvelope
-	if err := json.Unmarshal(data, &env); err == nil && len(env.Items) > 0 {
-		var items []Region
-		if err := json.Unmarshal(env.Items, &items); err != nil {
+	var all []Region
+	for offset := 0; ; {
+		env, err := s.getList(ctx, "/api/v2/regions.json", offset, listPageSize)
+		if err != nil {
 			return nil, err
 		}
-		return items, nil
+		var page []Region
+		if len(env.Items) > 0 {
+			if err := json.Unmarshal(env.Items, &page); err != nil {
+				return nil, fmt.Errorf("vkads regions: %w", err)
+			}
+		}
+		if len(page) == 0 {
+			break
+		}
+		all = append(all, page...)
+		if env.Count > 0 && len(all) >= env.Count {
+			break
+		}
+		offset += len(page)
 	}
-	var items []Region
-	if err := json.Unmarshal(data, &items); err != nil {
-		return nil, fmt.Errorf("vkads regions: %w", err)
-	}
-	return items, nil
+	return all, nil
 }
 
 func (s *Service) ListPackagePads(ctx context.Context, packageID int64) ([]Pad, error) {
-	q := url.Values{}
-	q.Set("limit", "200")
+	extra := url.Values{}
 	if packageID > 0 {
-		q.Set("_package_id", strconv.FormatInt(packageID, 10))
+		extra.Set("_package_id", strconv.FormatInt(packageID, 10))
 	}
-	data, err := s.Get(ctx, "/api/v2/packages_pads.json?"+q.Encode())
-	if err != nil {
-		return nil, err
-	}
-	var env listEnvelope
-	if err := json.Unmarshal(data, &env); err == nil && len(env.Items) > 0 {
-		var items []Pad
-		if err := json.Unmarshal(env.Items, &items); err != nil {
+	var all []Pad
+	for offset := 0; ; {
+		env, err := s.getListQuery(ctx, "/api/v2/packages_pads.json", offset, listPageSize, extra)
+		if err != nil {
 			return nil, err
 		}
-		return items, nil
+		var page []Pad
+		if len(env.Items) > 0 {
+			if err := json.Unmarshal(env.Items, &page); err != nil {
+				return nil, err
+			}
+		}
+		if len(page) == 0 {
+			break
+		}
+		all = append(all, page...)
+		if env.Count > 0 && len(all) >= env.Count {
+			break
+		}
+		offset += len(page)
 	}
-	var items []Pad
-	_ = json.Unmarshal(data, &items)
-	return items, nil
+	return all, nil
 }
 
 func (s *Service) CreateURL(ctx context.Context, rawURL string) (int64, error) {
