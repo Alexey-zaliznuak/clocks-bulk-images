@@ -29,6 +29,18 @@ func TestPlanBodyBudgetStringWhenOptimized(t *testing.T) {
 	if !ok || got != "999" {
 		t.Fatalf("plan budget_limit_day = %#v", body["budget_limit_day"])
 	}
+	if _, ok := body["ad_groups"]; ok {
+		t.Fatal("plan must not send empty ad_groups")
+	}
+	group := NestedGroupBody("Гущин", 77, testSettings(true, 999), testCatalog())
+	if _, ok := group["ad_plan_id"]; ok {
+		t.Fatal("nested group must not have ad_plan_id")
+	}
+	AttachCampaigns(body, []map[string]any{group})
+	list, _ := body["campaigns"].([]any)
+	if len(list) != 1 {
+		t.Fatalf("campaigns = %#v", body["campaigns"])
+	}
 }
 
 func TestGroupBodyOmitsBudgetWhenOptimized(t *testing.T) {
@@ -51,5 +63,12 @@ func TestGroupBodyBudgetWhenNotOptimized(t *testing.T) {
 	got, ok := group["budget_limit_day"].(string)
 	if !ok || got != "999" {
 		t.Fatalf("group budget_limit_day = %#v", group["budget_limit_day"])
+	}
+}
+
+func TestParseCreatePlanReadsNestedCampaigns(t *testing.T) {
+	planID, groups, err := parseCreatePlan([]byte(`{"id":340,"campaigns":[{"id":321},{"id":322}]}`))
+	if err != nil || planID != 340 || len(groups) != 2 || groups[0] != 321 || groups[1] != 322 {
+		t.Fatalf("plan=%d groups=%v err=%v", planID, groups, err)
 	}
 }

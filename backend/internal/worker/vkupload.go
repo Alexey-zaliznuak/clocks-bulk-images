@@ -39,8 +39,25 @@ func (w *Worker) doVKUpload(ctx context.Context, campaign *store.AdCampaign) err
 	if err != nil {
 		return err
 	}
+	items, err := w.store.ListUploadableAdCampaignItems(ctx, campaign.ID)
+	if err != nil {
+		return err
+	}
+	var pending []*store.AdCampaignItem
+	for _, item := range items {
+		if item.VKAdGroupID == "" {
+			pending = append(pending, item)
+		}
+	}
 	if campaign.VKAdPlanID == "" {
-		planID, err := w.vkads.CreateAdPlan(ctx, vkads.PlanBody(campaign.Title, settings, cat))
+		if len(pending) == 0 {
+			return fmt.Errorf("нет групп для создания кампании ВКР")
+		}
+		groups := make([]map[string]any, 0, len(pending))
+		for _, item := range pending {
+			groups = append(groups, vkads.NestedGroupBody(item.Value, item.AudienceID, settings, cat))
+		}
+		planID, groupIDs, err := w.vkads.CreateAdPlan(ctx, vkads.AttachCampaigns(vkads.PlanBody(campaign.Title, settings, cat), groups))
 		if err != nil {
 			return fmt.Errorf("создать кампанию ВКР: %w", err)
 		}
@@ -48,17 +65,22 @@ func (w *Worker) doVKUpload(ctx context.Context, campaign *store.AdCampaign) err
 		if err := w.store.SaveAdCampaignVK(ctx, campaign); err != nil {
 			return err
 		}
+		for i, id := range groupIDs {
+			if i >= len(pending) {
+				break
+			}
+			if err := w.store.SetAdCampaignItemGroupID(ctx, pending[i].ID, vkads.FormatID(id)); err != nil {
+				return err
+			}
+			pending[i].VKAdGroupID = vkads.FormatID(id)
+		}
 	}
 	planID, err := strconv.ParseInt(campaign.VKAdPlanID, 10, 64)
 	if err != nil {
 		return fmt.Errorf("id кампании ВКР: %w", err)
 	}
-	items, err := w.store.ListUploadableAdCampaignItems(ctx, campaign.ID)
-	if err != nil {
-		return err
-	}
 	var last error
-	for _, item := range items {
+	for _, item := range pending {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}

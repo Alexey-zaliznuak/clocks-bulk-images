@@ -375,22 +375,50 @@ func (s *Service) CreateURL(ctx context.Context, rawURL string) (int64, error) {
 	return out.ID, nil
 }
 
-func (s *Service) CreateAdPlan(ctx context.Context, body map[string]any) (int64, error) {
+func (s *Service) CreateAdPlan(ctx context.Context, body map[string]any) (int64, []int64, error) {
 	data, err := s.Post(ctx, "/api/v2/ad_plans.json", body)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
+	planID, groupIDs, err := parseCreatePlan(data)
+	if err != nil {
+		return 0, nil, err
+	}
+	return planID, groupIDs, nil
+}
+
+func parseCreatePlan(data []byte) (int64, []int64, error) {
 	var out struct {
-		ID int64 `json:"id"`
+		ID        int64 `json:"id"`
+		Campaigns []struct {
+			ID int64 `json:"id"`
+		} `json:"campaigns"`
+		AdGroups []struct {
+			ID int64 `json:"id"`
+		} `json:"ad_groups"`
 	}
 	if err := json.Unmarshal(data, &out); err != nil || out.ID == 0 {
-		return 0, fmt.Errorf("vkads ad_plan: unexpected %s", truncate(data, 300))
+		return 0, nil, fmt.Errorf("vkads ad_plan: unexpected %s", truncate(data, 300))
 	}
-	return out.ID, nil
+	var ids []int64
+	for _, item := range out.Campaigns {
+		if item.ID != 0 {
+			ids = append(ids, item.ID)
+		}
+	}
+	for _, item := range out.AdGroups {
+		if item.ID != 0 {
+			ids = append(ids, item.ID)
+		}
+	}
+	return out.ID, ids, nil
 }
 
 func (s *Service) CreateAdGroup(ctx context.Context, body map[string]any) (int64, error) {
-	data, err := s.Post(ctx, "/api/v2/ad_groups.json", body)
+	data, err := s.Post(ctx, "/api/v2/campaigns.json", body)
+	if err != nil {
+		data, err = s.Post(ctx, "/api/v2/ad_groups.json", body)
+	}
 	if err != nil {
 		return 0, err
 	}
@@ -398,7 +426,7 @@ func (s *Service) CreateAdGroup(ctx context.Context, body map[string]any) (int64
 		ID int64 `json:"id"`
 	}
 	if err := json.Unmarshal(data, &out); err != nil || out.ID == 0 {
-		return 0, fmt.Errorf("vkads ad_group: unexpected %s", truncate(data, 300))
+		return 0, fmt.Errorf("vkads campaign: unexpected %s", truncate(data, 300))
 	}
 	return out.ID, nil
 }

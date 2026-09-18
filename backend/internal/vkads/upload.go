@@ -69,7 +69,6 @@ func PlanBody(name string, settings Settings, cat *Catalog) map[string]any {
 		"ad_object_type":   "url",
 		"ad_object_id":     cat.URLID,
 		"autobidding_mode": autobiddingMode(settings.BiddingStrategy, settings.Optimization),
-		"ad_groups":        []any{},
 	}
 	if settings.Optimization {
 		applyMoney(body, settings)
@@ -77,6 +76,21 @@ func PlanBody(name string, settings Settings, cat *Catalog) map[string]any {
 	if cat.Package.PricedGoal != nil {
 		body["priced_goal"] = cat.Package.PricedGoal
 	}
+	return body
+}
+
+func AttachCampaigns(plan map[string]any, groups []map[string]any) map[string]any {
+	list := make([]any, 0, len(groups))
+	for _, group := range groups {
+		list = append(list, group)
+	}
+	plan["campaigns"] = list
+	return plan
+}
+
+func NestedGroupBody(name string, audienceID int64, settings Settings, cat *Catalog) map[string]any {
+	body := GroupBody(name, 0, audienceID, settings, cat)
+	delete(body, "ad_plan_id")
 	return body
 }
 
