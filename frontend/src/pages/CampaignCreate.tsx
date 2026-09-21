@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api, type CampaignDiagnostics, type MediaAsset, type VideoModel } from "../api";
+import { api, type CampaignDiagnostics, type CTAOption, type MediaAsset, type VideoModel } from "../api";
 import {
   applyNamePreview,
   hasNamePlaceholder,
@@ -93,6 +93,7 @@ export default function CampaignCreate() {
   const [padsLoading, setPadsLoading] = useState(false);
   const [padsError, setPadsError] = useState("");
   const [padsPackage, setPadsPackage] = useState("");
+  const [ctaOptions, setCtaOptions] = useState<CTAOption[]>([]);
   const padsTouched = useRef(false);
 
   useEffect(() => {
@@ -134,6 +135,32 @@ export default function CampaignCreate() {
       .finally(() => {
         if (current) setPadsLoading(false);
       });
+    return () => {
+      current = false;
+    };
+  }, [vkSettings.targetAction, loadingDefaults]);
+
+  // The buttons on offer come from VK, and campaigns saved when the field was
+  // free text still carry a caption VK never had — swap it for the button that
+  // matches the goal instead of letting the upload silently pick one.
+  useEffect(() => {
+    if (loadingDefaults) return;
+    let current = true;
+    api.vkAdsCta(vkSettings.targetAction)
+      .then((res) => {
+        if (!current) return;
+        const options = res.options || [];
+        setCtaOptions(options);
+        setVkSettings((s) => {
+          const saved = (s.bannerCta || "").trim();
+          const match = options.find(
+            (o) => o.id.toLowerCase() === saved.toLowerCase() || o.label.toLowerCase() === saved.toLowerCase(),
+          );
+          const next = match?.id || res.default || saved;
+          return next === s.bannerCta ? s : { ...s, bannerCta: next };
+        });
+      })
+      .catch(() => {});
     return () => {
       current = false;
     };
@@ -185,6 +212,14 @@ export default function CampaignCreate() {
       })
       .catch((e) => setAudioError(e instanceof Error ? e.message : "Не удалось загрузить медиатеку"));
   }, []);
+
+  // Until VK answers, the select still has to show what is stored, otherwise
+  // the field reads as empty and a submit would clear the button.
+  const ctaChoices = useMemo(() => {
+    const saved = vkSettings.bannerCta;
+    if (!saved || ctaOptions.some((o) => o.id === saved)) return ctaOptions;
+    return [{ id: saved, label: saved }, ...ctaOptions];
+  }, [ctaOptions, vkSettings.bannerCta]);
 
   const names = useMemo(() => normalizeCampaignList(namesText), [namesText]);
   const surnames = useMemo(() => normalizeCampaignList(surnamesText), [surnamesText]);
@@ -537,11 +572,20 @@ export default function CampaignCreate() {
                 />
               </Field>
               <Field label="Надпись на кнопке">
-                <input
+                <select
                   className={inputCls}
                   value={vkSettings.bannerCta}
                   onChange={(e) => setVkSettings((s) => ({ ...s, bannerCta: e.target.value }))}
-                />
+                >
+                  {ctaChoices.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-slate-500">
+                  ВК рисует кнопку сам и принимает только свои надписи — выберите ближайшую.
+                </p>
               </Field>
               <div className="flex overflow-x-auto border-b border-slate-200" role="tablist" aria-label="Описание объявления">
                 <TabButton active={adsListTab === "names"} onClick={() => setAdsListTab("names")}>

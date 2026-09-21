@@ -17,6 +17,9 @@ type Catalog struct {
 	URLID     int64
 	DateStart string
 	Patterns  []BannerPattern
+	// CTA is the button identifier VK accepts, resolved from the caption the
+	// form stored.
+	CTA string
 }
 
 func (s *Service) ResolveCatalog(ctx context.Context, settings Settings, createdAt time.Time) (*Catalog, error) {
@@ -25,10 +28,16 @@ func (s *Service) ResolveCatalog(ctx context.Context, settings Settings, created
 	if err != nil {
 		return nil, err
 	}
-	pkg := PickCommunityMessagePackage(packages, settings.TargetAction)
+	pkg := PickCommunityPackage(packages, settings.TargetAction)
 	if pkg == nil {
-		return nil, fmt.Errorf("vkads: нет пакета для сообщества / отправки сообщения")
+		for _, p := range packages {
+			if isCommunityPackage(p) {
+				log.Printf("vkads: пакет сообщества в кабинете — %s", DescribePackage(p))
+			}
+		}
+		return nil, fmt.Errorf("vkads: нет пакета сообщества под действие %q", settings.TargetAction)
 	}
+	log.Printf("vkads: действие %q → пакет %s", settings.TargetAction, DescribePackage(*pkg))
 	regions, err := s.ListRegions(ctx)
 	if err != nil {
 		return nil, err
@@ -64,6 +73,8 @@ func (s *Service) ResolveCatalog(ctx context.Context, settings Settings, created
 	if err != nil {
 		return nil, err
 	}
+	cta := ResolveCTA(settings.BannerCTA, settings.TargetAction, s.CTAOptions(ctx, CTARoleCommunity))
+	log.Printf("vkads: кнопка %q → %q", settings.BannerCTA, cta)
 	return &Catalog{
 		Package:   *pkg,
 		RussiaID:  russia,
@@ -71,6 +82,7 @@ func (s *Service) ResolveCatalog(ctx context.Context, settings Settings, created
 		URLID:     urlID,
 		DateStart: start,
 		Patterns:  patterns,
+		CTA:       cta,
 	}, nil
 }
 

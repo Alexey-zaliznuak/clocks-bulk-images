@@ -37,7 +37,7 @@ export const defaultVKSettings = (): VKSettings => ({
   pads: [],
   refTags: "ref_source=vk_ads_yulya&ref={{banner_id}}",
   bannerTitle: "RuTime | именные наручные часы",
-  bannerCta: "Узнать цену",
+  bannerCta: "contactUs",
 });
 
 export function parseOptionalNumber(value: string): number | null {

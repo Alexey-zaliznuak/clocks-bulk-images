@@ -277,7 +277,7 @@ func (w *Worker) prepareBanner(ctx context.Context, item *store.AdCampaignItem, 
 		images,
 		settings.BannerTitle,
 		adcampaign.RenderNameText(text, item.Value),
-		vkads.CommunityCTA(settings.TargetAction),
+		cat.CTA,
 		pattern,
 	), nil
 }

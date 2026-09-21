@@ -326,9 +326,10 @@ func (s *Service) PlacementTreeForSettings(ctx context.Context, settings Setting
 	if err != nil {
 		return nil, err
 	}
-	pkg := PickCommunityMessagePackage(packages, settings.Normalize().TargetAction)
+	action := settings.Normalize().TargetAction
+	pkg := PickCommunityPackage(packages, action)
 	if pkg == nil {
-		return nil, fmt.Errorf("vkads: нет пакета для сообщества / отправки сообщения")
+		return nil, fmt.Errorf("vkads: нет пакета сообщества под действие %q", action)
 	}
 	scoped := s.PackagePlacements(ctx, *pkg)
 	// The form must offer exactly what ResolvePads will accept, otherwise a

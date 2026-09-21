@@ -779,13 +779,6 @@ func VideoRole(width, height int) string {
 	}
 }
 
-func CommunityCTA(targetAction string) string {
-	if containsFold(targetAction, "join", "вступ") {
-		return "signUp"
-	}
-	return "contactUs"
-}
-
 func clipRunes(s string, n int) string {
 	if n <= 0 || utf8.RuneCountInString(s) <= n {
 		return s

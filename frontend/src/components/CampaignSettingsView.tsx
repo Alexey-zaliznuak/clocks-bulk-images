@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { type AdCampaign } from "../api";
+import { type AdCampaign, type CTAOption } from "../api";
 import PadsTree from "./PadsTree";
 import VKLink from "./VKLink";
 import { type PadNode } from "../padsTree";
@@ -15,12 +15,14 @@ export default function CampaignSettingsView({
   padsLoading,
   padsError,
   cabinet = null,
+  ctaOptions = [],
 }: {
   campaign: AdCampaign;
   padTrees: PadNode[];
   padsLoading?: boolean;
   padsError?: string;
   cabinet?: VKCabinet | null;
+  ctaOptions?: CTAOption[];
 }) {
   const [tab, setTab] = useState<SettingsTab>("campaign");
   const [listTab, setListTab] = useState<ListTab>("names");
@@ -114,7 +116,7 @@ export default function CampaignSettingsView({
         {tab === "ads" && (
           <>
             <Field label="Заголовок объявления" value={vk.bannerTitle || "—"} />
-            <Field label="Надпись на кнопке" value={vk.bannerCta || "—"} />
+            <Field label="Надпись на кнопке" value={ctaLabel(ctaOptions, vk.bannerCta)} />
             <div className="flex overflow-x-auto border-b border-slate-200" role="tablist" aria-label="Описание объявления">
               <TabButton active={adsTab === "names"} onClick={() => setAdsTab("names")}>Описание для имён</TabButton>
               <TabButton active={adsTab === "surnames"} onClick={() => setAdsTab("surnames")}>Описание для фамилий</TabButton>
@@ -196,6 +198,12 @@ function biddingLabel(value: string) {
   if (value === "max_goals") return "Максимум конверсий";
   if (value === "second_price_mean") return "Средняя цена";
   return value || "—";
+}
+
+// ctaLabel turns the stored VK identifier back into the wording the cabinet
+// shows, falling back to the raw value for campaigns saved as free text.
+function ctaLabel(options: CTAOption[], value: string) {
+  return options.find((o) => o.id === value)?.label || value || "—";
 }
 
 function sexLabel(value: string) {

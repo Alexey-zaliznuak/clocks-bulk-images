@@ -86,15 +86,42 @@ func TestTextListObjective(t *testing.T) {
 	}
 }
 
-func TestPickCommunityMessagePackage(t *testing.T) {
+func TestPickCommunityPackage(t *testing.T) {
 	packages := []Package{
 		{ID: 1, Name: "Traffic", Objective: "traffic"},
 		{ID: 2, Name: "Community clicks", Objective: "socialengagement"},
 		{ID: 3, Name: "Community", Objective: "community", PricedGoal: &PriceGoal{Name: "Отправка сообщения"}},
 	}
-	got := PickCommunityMessagePackage(packages, "send_message")
+	got := PickCommunityPackage(packages, "send_message")
 	if got == nil || got.ID != 3 {
 		t.Fatalf("got %#v", got)
+	}
+}
+
+// The cabinet names the campaign after the package's priced goal, so the join
+// package must never stand in for a campaign that collects messages.
+func TestPickCommunityPackageSkipsTheJoinGoal(t *testing.T) {
+	join := Package{
+		ID:         3122,
+		Name:       "or_tt_crossdevice_community_vk_ocpm_socialengagement_pricedGoals_join",
+		Objective:  "socialengagement",
+		PricedGoal: &PriceGoal{Name: "Подписка на сообщество"},
+	}
+	message := Package{
+		ID:         3127,
+		Name:       "or_tt_crossdevice_community_vk_ocpm_socialengagement_pricedGoals_message",
+		Objective:  "socialengagement",
+		PricedGoal: &PriceGoal{Name: "Отправка сообщения"},
+	}
+	packages := []Package{join, message}
+	if got := PickCommunityPackage(packages, "send_message"); got == nil || got.ID != 3127 {
+		t.Fatalf("сообщение → %#v", got)
+	}
+	if got := PickCommunityPackage(packages, "join_community"); got == nil || got.ID != 3122 {
+		t.Fatalf("вступление → %#v", got)
+	}
+	if got := PickCommunityPackage([]Package{join}, "send_message"); got != nil {
+		t.Fatalf("подписочный пакет не должен подменять сообщения: %#v", got)
 	}
 }
 

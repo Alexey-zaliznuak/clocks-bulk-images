@@ -540,26 +540,62 @@ func containsFold(haystack string, needles ...string) bool {
 	return false
 }
 
-func PickCommunityMessagePackage(packages []Package, targetAction string) *Package {
-	var fallback *Package
+// PickCommunityPackage returns the community package whose priced goal matches
+// the target action. VK sells the two goals as separate packages — one charges
+// for joining the community, the other for writing to it — and the cabinet
+// labels the campaign after whichever package created its groups. Picking the
+// wrong one is invisible in our request and shows up as "Подписка на
+// сообщество" next to a campaign that was meant to collect messages.
+func PickCommunityPackage(packages []Package, targetAction string) *Package {
+	wantJoin := isJoinAction(targetAction)
+	var neutral *Package
 	for i := range packages {
 		p := &packages[i]
-		blob := string(p.Objective) + " " + p.Name + " " + p.Description
-		community := containsFold(blob, "community", "socialengagement", "социаль", "сообществ", "групп")
-		if !community {
+		if !isCommunityPackage(*p) {
 			continue
 		}
-		if fallback == nil {
-			fallback = p
+		join, message := packageGoal(*p)
+		if join && message {
+			continue
 		}
-		if p.PricedGoal != nil && containsFold(p.PricedGoal.Name+" "+p.Description+" "+targetAction, "сообщен", "перепис", "conversation") {
+		if (wantJoin && join) || (!wantJoin && message) {
 			return p
 		}
-		if p.PricedGoal != nil && containsFold(p.PricedGoal.Name, "message") && containsFold(targetAction, "message") {
-			return p
+		if neutral == nil && !join && !message {
+			neutral = p
 		}
 	}
-	return fallback
+	return neutral
+}
+
+func isJoinAction(targetAction string) bool {
+	return containsFold(targetAction, "join", "вступ", "подпис", "subscribe")
+}
+
+func isCommunityPackage(p Package) bool {
+	blob := string(p.Objective) + " " + p.Name + " " + p.Description
+	return containsFold(blob, "community", "socialengagement", "социаль", "сообществ", "групп")
+}
+
+// packageGoal tells the community packages apart by the goal they charge for.
+func packageGoal(p Package) (join, message bool) {
+	blob := p.Name + " " + p.Description
+	if p.PricedGoal != nil {
+		blob += " " + p.PricedGoal.Name
+	}
+	join = containsFold(blob, "join", "вступ", "подпис", "subscribe")
+	message = containsFold(blob, "message", "написать", "сообщен", "перепис", "conversation", "dialog")
+	return join, message
+}
+
+// DescribePackage renders a package for the log: the id alone says nothing
+// about which of the two community goals it sells.
+func DescribePackage(p Package) string {
+	goal := ""
+	if p.PricedGoal != nil {
+		goal = p.PricedGoal.Name
+	}
+	return fmt.Sprintf("%d %q цель %q", p.ID, p.Name, goal)
 }
 
 func russiaRegionID(regions []Region) int64 {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, type AdCampaign, type AdCampaignItem } from "../api";
+import { api, type AdCampaign, type AdCampaignItem, type CTAOption } from "../api";
 import ConfirmDialog from "../components/ConfirmDialog";
 import CampaignSettingsView from "../components/CampaignSettingsView";
 import VKLink from "../components/VKLink";
@@ -35,6 +35,7 @@ export default function CampaignDetail() {
   const [message, setMessage] = useState("");
   const [padTrees, setPadTrees] = useState<PadNode[]>([]);
   const [cabinet, setCabinet] = useState<VKCabinet | null>(null);
+  const [ctaOptions, setCtaOptions] = useState<CTAOption[]>([]);
 
   const loadCampaign = useCallback(async () => {
     try {
@@ -76,6 +77,9 @@ export default function CampaignDetail() {
   useEffect(() => {
     api.vkAdsPads(campaign?.vkSettings?.targetAction)
       .then((res) => setPadTrees(res.trees || []))
+      .catch(() => {});
+    api.vkAdsCta(campaign?.vkSettings?.targetAction)
+      .then((res) => setCtaOptions(res.options || []))
       .catch(() => {});
   }, [campaign?.vkSettings?.targetAction]);
 
@@ -272,6 +276,7 @@ export default function CampaignDetail() {
         campaign={campaign}
         padTrees={padTrees}
         cabinet={cabinet}
+        ctaOptions={ctaOptions}
       />
 
       <section className="space-y-3">

@@ -104,6 +104,7 @@ func (s *Server) Router() http.Handler {
 		pr.Get("/api/vk-ads/status", s.handleVKAdsStatus)
 		pr.Get("/api/vk-ads/pads", s.handleVKAdsPads)
 		pr.Get("/api/vk-ads/cabinet", s.handleVKAdsCabinet)
+		pr.Get("/api/vk-ads/cta", s.handleVKAdsCTA)
 		pr.Get("/api/models", s.handleModels)
 		pr.Post("/api/tasks/batch", s.handleCreateBatch)
 		pr.Get("/api/tasks", s.handleListTasks)
@@ -245,6 +246,24 @@ func (s *Server) handleVKAdsPads(w http.ResponseWriter, r *http.Request) {
 		"trees":       opts.Trees,
 		"packageName": opts.Package.Name,
 		"defaultPads": opts.Default,
+	})
+}
+
+// handleVKAdsCTA lists the buttons VK accepts on a community banner. The
+// cabinet only takes its own identifiers, so the form picks from this list
+// instead of letting a caption be typed in.
+func (s *Server) handleVKAdsCTA(w http.ResponseWriter, r *http.Request) {
+	if s.vkads == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"configured": false, "options": []vkads.CTAOption{}})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	options := s.vkads.CTAOptions(ctx, vkads.CTARoleCommunity)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"configured": true,
+		"options":    options,
+		"default":    vkads.ResolveCTA("", r.URL.Query().Get("targetAction"), options),
 	})
 }
 

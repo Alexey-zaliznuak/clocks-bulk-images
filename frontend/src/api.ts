@@ -91,6 +91,13 @@ async function uploadForBlob(
 
 // ---------- types ----------
 
+// CTAOption is one button VK accepts on a banner: the id travels to the API,
+// the label is the wording the cabinet shows.
+export interface CTAOption {
+  id: string;
+  label: string;
+}
+
 export interface VideoModel {
   id: string;
   name: string;
@@ -268,6 +275,11 @@ export const api = {
 
   vkAdsCabinet: () =>
     request<{ configured: boolean; baseUrl?: string; sudo?: string }>("/api/vk-ads/cabinet"),
+
+  vkAdsCta: (targetAction?: string) =>
+    request<{ configured: boolean; options: CTAOption[]; default?: string }>(
+      `/api/vk-ads/cta${targetAction ? `?targetAction=${encodeURIComponent(targetAction)}` : ""}`,
+    ),
 
   vkAdsPads: (targetAction?: string) =>
     request<{
