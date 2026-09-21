@@ -23,13 +23,21 @@ type CTAOption struct {
 	Label string `json:"label"`
 }
 
-// ctaWording is how the cabinet spells the identifiers of the banner field
-// registry. Price buttons are named here but deliberately left out of the
-// fallback list below: they are only known to exist for some goals, and
-// offering an identifier VK does not sell would fail the upload.
+// ctaWording names the identifiers the registry returns beyond the documented
+// list — community banners sell most of them. They are deliberately kept out
+// of the fallback list below: which buttons a cabinet offers depends on the
+// goal, and sending an identifier VK does not sell fails the upload.
 var ctaWording = map[string]string{
-	"getPrice": "Узнать цену",
-	"price":    "Узнать цену",
+	"getPrice":    "Узнать цену",
+	"price":       "Узнать цену",
+	"subscribe":   "Подписаться",
+	"message":     "Написать сообщение",
+	"write":       "Написать",
+	"getoffer":    "Получить предложение",
+	"getOffer":    "Получить предложение",
+	"askQuestion": "Задать вопрос",
+	"startChat":   "Начать чат",
+	"install":     "Установить",
 }
 
 // ctaKnown is the button list of the API documentation. It backs the form when
@@ -88,6 +96,12 @@ func (s *Service) CTAOptions(ctx context.Context, role string) []CTAOption {
 // allows, so it is paged through and kept for an hour like the other
 // dictionaries.
 func (s *Service) ctaRegistry(ctx context.Context) (map[string][]string, error) {
+	// The form asks for the buttons from several places at once, and the walk
+	// costs a page request per 50 fields, so callers queue up behind the first
+	// one instead of each walking VK on their own.
+	s.ctaMu.Lock()
+	defer s.ctaMu.Unlock()
+
 	s.mu.Lock()
 	if s.ctaCatalog != nil && s.now().Sub(s.ctaAt) < catalogTTL {
 		cached := s.ctaCatalog

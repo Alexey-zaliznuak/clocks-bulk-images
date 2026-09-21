@@ -59,6 +59,7 @@ type Service struct {
 	patternsAt    time.Time
 	ctaCatalog    map[string][]string
 	ctaAt         time.Time
+	ctaMu         sync.Mutex
 	user          *User
 	userAt        time.Time
 	nextOK        time.Time
