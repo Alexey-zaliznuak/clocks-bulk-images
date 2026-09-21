@@ -9,9 +9,11 @@ const (
 	DefaultObjective       string = "community"
 	DefaultBudgetDay              = 999.0
 	DefaultBannerTitle     string = "RuTime | именные наручные часы"
-	// DefaultBannerCTA is a VK button identifier, not a caption: the cabinet
-	// renders its own wording and rejects anything outside its list.
-	DefaultBannerCTA string = "contactUs"
+	// DefaultBannerCTA is the caption the ad text asks for. VK renders its own
+	// wording, so ResolveCTA turns this into whichever button the cabinet sells
+	// under that meaning, and falls back to the goal's button when it sells
+	// none.
+	DefaultBannerCTA string = "Узнать цену"
 )
 
 // Settings is the shared VK Ads form stored on the campaign and cloned into

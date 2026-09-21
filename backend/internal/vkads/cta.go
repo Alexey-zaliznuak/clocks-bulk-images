@@ -3,7 +3,9 @@ package vkads
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"unicode"
 )
@@ -22,9 +24,18 @@ type CTAOption struct {
 }
 
 // ctaWording is how the cabinet spells the identifiers of the banner field
-// registry. It names whatever the registry returns and stands in for it when
-// VK is unreachable.
-var ctaWording = []CTAOption{
+// registry. Price buttons are named here but deliberately left out of the
+// fallback list below: they are only known to exist for some goals, and
+// offering an identifier VK does not sell would fail the upload.
+var ctaWording = map[string]string{
+	"getPrice": "Узнать цену",
+	"price":    "Узнать цену",
+}
+
+// ctaKnown is the button list of the API documentation. It backs the form when
+// the registry cannot be read, so an unreachable dictionary does not leave the
+// form without a button to pick.
+var ctaKnown = []CTAOption{
 	{ID: "contactUs", Label: "Связаться"},
 	{ID: "signUp", Label: "Вступить"},
 	{ID: "learnMore", Label: "Узнать больше"},
@@ -61,33 +72,61 @@ func (s *Service) CTAOptions(ctx context.Context, role string) []CTAOption {
 		log.Printf("vkads: реестр полей недоступен (%v), берём известные кнопки", err)
 		return ctaFallback()
 	}
-	ids := ctaIDsInRegistry(data, role)
+	catalog := ctaCatalogInRegistry(data)
+	logCTACatalog(catalog, data)
+	ids := catalog[strings.ToLower(role)]
 	if len(ids) == 0 {
-		log.Printf("vkads: в реестре полей нет значений для %s, берём известные кнопки", role)
 		return ctaFallback()
 	}
-	known := ctaWordingByID()
 	out := make([]CTAOption, 0, len(ids))
 	for _, id := range ids {
-		label := known[id]
-		if label == "" {
-			label = id
-		}
-		out = append(out, CTAOption{ID: id, Label: label})
+		out = append(out, CTAOption{ID: id, Label: ctaLabel(id)})
 	}
 	return out
+}
+
+// logCTACatalog prints every button VK sells, not just the role at hand: the
+// list differs per cabinet and per goal, and the log is the only place to see
+// what the cabinet actually offers. A registry we failed to read is dumped raw
+// so its shape can be worked out.
+func logCTACatalog(catalog map[string][]string, raw []byte) {
+	if len(catalog) == 0 {
+		log.Printf("vkads: в реестре полей не нашли кнопок, ответ: %s", truncate(raw, 8000))
+		return
+	}
+	roles := make([]string, 0, len(catalog))
+	for role := range catalog {
+		roles = append(roles, role)
+	}
+	sort.Strings(roles)
+	for _, role := range roles {
+		ids := catalog[role]
+		labelled := make([]string, 0, len(ids))
+		for _, id := range ids {
+			if label := ctaLabel(id); label != id {
+				labelled = append(labelled, fmt.Sprintf("%s (%s)", id, label))
+				continue
+			}
+			labelled = append(labelled, id)
+		}
+		log.Printf("vkads: кнопки %s — %d: %s", role, len(ids), strings.Join(labelled, ", "))
+	}
 }
 
 func ctaFallback() []CTAOption {
-	return append([]CTAOption(nil), ctaWording...)
+	return append([]CTAOption(nil), ctaKnown...)
 }
 
-func ctaWordingByID() map[string]string {
-	out := make(map[string]string, len(ctaWording))
-	for _, o := range ctaWording {
-		out[o.ID] = o.Label
+func ctaLabel(id string) string {
+	if label := ctaWording[id]; label != "" {
+		return label
 	}
-	return out
+	for _, o := range ctaKnown {
+		if o.ID == id {
+			return o.Label
+		}
+	}
+	return id
 }
 
 // ResolveCTA turns the saved caption into an identifier VK understands. The
@@ -105,9 +144,50 @@ func ResolveCTA(saved, targetAction string, options []CTAOption) string {
 				return o.ID
 			}
 		}
+		if id := ctaByMeaning(want, options); id != "" {
+			return id
+		}
 		log.Printf("vkads: кнопка %q не входит в список ВК, берём кнопку по целевому действию", want)
 	}
 	return defaultCTA(targetAction, options)
+}
+
+// ctaMeanings pairs the wording our forms use with the words VK puts inside
+// its identifiers. The cabinet renames buttons between releases, so a caption
+// is matched by meaning before it is given up on.
+var ctaMeanings = []struct {
+	caption []string
+	button  []string
+}{
+	{caption: []string{"цен", "стоимост", "price"}, button: []string{"price"}},
+	{caption: []string{"написа", "сообщен", "связ", "contact", "message"}, button: []string{"contactus", "message", "write"}},
+	{caption: []string{"вступ", "подпис", "join", "subscribe"}, button: []string{"signup", "join", "subscribe"}},
+	{caption: []string{"подробн", "больше", "more"}, button: []string{"learnmore", "learn", "more"}},
+}
+
+func ctaByMeaning(saved string, options []CTAOption) string {
+	want := strings.ToLower(saved)
+	for _, meaning := range ctaMeanings {
+		if !containsAny(want, meaning.caption) {
+			continue
+		}
+		for _, o := range options {
+			if containsAny(strings.ToLower(o.ID), meaning.button) {
+				log.Printf("vkads: кнопку %q ВК называет %q", saved, o.ID)
+				return o.ID
+			}
+		}
+	}
+	return ""
+}
+
+func containsAny(s string, needles []string) bool {
+	for _, n := range needles {
+		if strings.Contains(s, n) {
+			return true
+		}
+	}
+	return false
 }
 
 // defaultCTA is the button that matches the goal of the campaign, narrowed to
@@ -130,28 +210,31 @@ func defaultCTA(targetAction string, options []CTAOption) string {
 	return "contactUs"
 }
 
-// ctaIDsInRegistry digs the allowed values of one role out of banner_fields.
-// The registry nests fields differently per VK release, so the walk looks for
-// any object that names the role and collects the identifiers around it rather
-// than relying on one shape.
-func ctaIDsInRegistry(data []byte, role string) []string {
+// ctaCatalogInRegistry digs every button role out of banner_fields, keyed by
+// the lowercased role. The registry nests fields differently per VK release,
+// so the walk looks for any object naming a cta role and collects the
+// identifiers around it rather than relying on one shape.
+func ctaCatalogInRegistry(data []byte) map[string][]string {
 	var doc any
 	if err := json.Unmarshal(data, &doc); err != nil {
 		return nil
 	}
-	var ids []string
-	seen := map[string]struct{}{}
+	catalog := map[string][]string{}
+	seen := map[string]map[string]struct{}{}
 	var walk func(node any)
 	walk = func(node any) {
 		switch v := node.(type) {
 		case map[string]any:
-			if objectNames(v, role) {
+			if role := ctaRoleOf(v); role != "" {
 				for _, id := range ctaValues(v) {
-					if _, ok := seen[id]; ok {
+					if seen[role] == nil {
+						seen[role] = map[string]struct{}{}
+					}
+					if _, ok := seen[role][id]; ok {
 						continue
 					}
-					seen[id] = struct{}{}
-					ids = append(ids, id)
+					seen[role][id] = struct{}{}
+					catalog[role] = append(catalog[role], id)
 				}
 			}
 			for _, child := range v {
@@ -164,16 +247,28 @@ func ctaIDsInRegistry(data []byte, role string) []string {
 		}
 	}
 	walk(doc)
-	return ids
-}
-
-func objectNames(obj map[string]any, role string) bool {
-	for _, key := range []string{"role", "name", "field", "id"} {
-		if s, ok := obj[key].(string); ok && strings.EqualFold(s, role) {
-			return true
+	for role, ids := range catalog {
+		if len(ids) == 0 {
+			delete(catalog, role)
 		}
 	}
-	return false
+	return catalog
+}
+
+// ctaRoleOf returns the button role an entry describes, if any. VK spells the
+// roles "cta_community_vk", "cta_sites_full" and so on, so the prefix is what
+// tells a button field from the rest of the registry.
+func ctaRoleOf(obj map[string]any) string {
+	for _, key := range []string{"role", "name", "field", "id"} {
+		s, ok := obj[key].(string)
+		if !ok {
+			continue
+		}
+		if lower := strings.ToLower(s); strings.HasPrefix(lower, "cta") {
+			return lower
+		}
+	}
+	return ""
 }
 
 // ctaValues collects the identifiers of a registry entry, accepting both plain

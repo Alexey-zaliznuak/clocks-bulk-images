@@ -12,6 +12,15 @@ func TestResolveCTAAcceptsIdentifierAndCaption(t *testing.T) {
 	}
 }
 
+// The ad text tells people to press "Узнать цену", so the caption has to find
+// the price button whenever the cabinet sells one under its own name.
+func TestResolveCTAFindsThePriceButtonByMeaning(t *testing.T) {
+	options := []CTAOption{{ID: "contactUs", Label: "Связаться"}, {ID: "getPrice", Label: "Узнать цену"}}
+	if got := ResolveCTA(DefaultBannerCTA, "send_message", options); got != "getPrice" {
+		t.Fatalf("цена = %q", got)
+	}
+}
+
 // Campaigns saved before the form offered a list still carry free text, and an
 // unknown caption must not travel to VK as the button.
 func TestResolveCTAFallsBackToTheAction(t *testing.T) {
@@ -24,20 +33,24 @@ func TestResolveCTAFallsBackToTheAction(t *testing.T) {
 	}
 }
 
-func TestCTAIDsInRegistryReadsBothShapes(t *testing.T) {
+func TestCTACatalogInRegistryReadsBothShapes(t *testing.T) {
 	plain := []byte(`{"items":[{"name":"cta_community_vk","limits":{"values":["signUp","contactUs"]}},
+		{"name":"cta_sites_full","limits":{"values":["visitSite"]}},
 		{"name":"title_40_vkads","limits":{"max_length":40}}]}`)
-	got := ctaIDsInRegistry(plain, "cta_community_vk")
+	catalog := ctaCatalogInRegistry(plain)
+	got := catalog["cta_community_vk"]
 	if len(got) != 2 || got[0] != "signUp" || got[1] != "contactUs" {
 		t.Fatalf("список значений = %v", got)
 	}
-
-	pairs := []byte(`{"items":[{"role":"cta_community_vk","values":[{"value":"signUp","name":"Вступить"}]}]}`)
-	if got := ctaIDsInRegistry(pairs, "cta_community_vk"); len(got) != 1 || got[0] != "signUp" {
-		t.Fatalf("пары значение-надпись = %v", got)
+	if other := catalog["cta_sites_full"]; len(other) != 1 || other[0] != "visitSite" {
+		t.Fatalf("вторая роль = %v", other)
+	}
+	if _, ok := catalog["title_40_vkads"]; ok {
+		t.Fatalf("в каталог попала не кнопка: %v", catalog)
 	}
 
-	if got := ctaIDsInRegistry(plain, "cta_sites_full"); len(got) != 0 {
-		t.Fatalf("чужая роль = %v", got)
+	pairs := []byte(`{"items":[{"role":"cta_community_vk","values":[{"value":"signUp","name":"Вступить"}]}]}`)
+	if got := ctaCatalogInRegistry(pairs)["cta_community_vk"]; len(got) != 1 || got[0] != "signUp" {
+		t.Fatalf("пары значение-надпись = %v", got)
 	}
 }

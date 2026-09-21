@@ -263,7 +263,7 @@ func (s *Server) handleVKAdsCTA(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"configured": true,
 		"options":    options,
-		"default":    vkads.ResolveCTA("", r.URL.Query().Get("targetAction"), options),
+		"default":    vkads.ResolveCTA(vkads.DefaultBannerCTA, r.URL.Query().Get("targetAction"), options),
 	})
 }
 
