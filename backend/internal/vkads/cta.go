@@ -67,13 +67,11 @@ var ctaKnown = []CTAOption{
 // known wording when the registry cannot be read: an unreachable dictionary
 // must not leave the form without a button to pick.
 func (s *Service) CTAOptions(ctx context.Context, role string) []CTAOption {
-	data, err := s.Get(ctx, "/api/v2/banner_fields.json?limit=250")
+	catalog, err := s.ctaRegistry(ctx)
 	if err != nil {
 		log.Printf("vkads: реестр полей недоступен (%v), берём известные кнопки", err)
 		return ctaFallback()
 	}
-	catalog := ctaCatalogInRegistry(data)
-	logCTACatalog(catalog, data)
 	ids := catalog[strings.ToLower(role)]
 	if len(ids) == 0 {
 		return ctaFallback()
@@ -85,13 +83,74 @@ func (s *Service) CTAOptions(ctx context.Context, role string) []CTAOption {
 	return out
 }
 
+// ctaRegistry walks banner_fields and caches the buttons it names. The
+// registry lists every banner field VK has, well past the 50 rows one page
+// allows, so it is paged through and kept for an hour like the other
+// dictionaries.
+func (s *Service) ctaRegistry(ctx context.Context) (map[string][]string, error) {
+	s.mu.Lock()
+	if s.ctaCatalog != nil && s.now().Sub(s.ctaAt) < catalogTTL {
+		cached := s.ctaCatalog
+		s.mu.Unlock()
+		return cached, nil
+	}
+	s.mu.Unlock()
+
+	catalog := map[string][]string{}
+	var lastPage []byte
+	fields := 0
+	for pages, offset := 0, 0; pages < 40; pages++ {
+		env, err := s.getList(ctx, "/api/v2/banner_fields.json", offset, listPageSize)
+		if err != nil {
+			if fields > 0 {
+				break
+			}
+			return nil, err
+		}
+		var page []any
+		if len(env.Items) > 0 {
+			_ = json.Unmarshal(env.Items, &page)
+		}
+		lastPage = env.Items
+		mergeCTACatalog(catalog, ctaCatalogInRegistry(env.Items))
+		fields += len(page)
+		if len(page) < listPageSize || (env.Count > 0 && fields >= env.Count) {
+			break
+		}
+		offset += len(page)
+	}
+	logCTACatalog(catalog, fields, lastPage)
+	s.mu.Lock()
+	s.ctaCatalog = catalog
+	s.ctaAt = s.now()
+	s.mu.Unlock()
+	return catalog, nil
+}
+
+func mergeCTACatalog(into, from map[string][]string) {
+	for role, ids := range from {
+		seen := map[string]struct{}{}
+		for _, id := range into[role] {
+			seen[id] = struct{}{}
+		}
+		for _, id := range ids {
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			into[role] = append(into[role], id)
+		}
+	}
+}
+
 // logCTACatalog prints every button VK sells, not just the role at hand: the
 // list differs per cabinet and per goal, and the log is the only place to see
-// what the cabinet actually offers. A registry we failed to read is dumped raw
-// so its shape can be worked out.
-func logCTACatalog(catalog map[string][]string, raw []byte) {
+// what the cabinet actually offers. A registry we read but found no buttons in
+// is dumped raw so its shape can be worked out.
+func logCTACatalog(catalog map[string][]string, fields int, lastPage []byte) {
 	if len(catalog) == 0 {
-		log.Printf("vkads: в реестре полей не нашли кнопок, ответ: %s", truncate(raw, 8000))
+		log.Printf("vkads: в реестре полей (%d шт.) не нашли кнопок, последняя страница: %s",
+			fields, truncate(lastPage, 8000))
 		return
 	}
 	roles := make([]string, 0, len(catalog))

@@ -1,6 +1,15 @@
 package vkads
 
-import "testing"
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+)
 
 func TestResolveCTAAcceptsIdentifierAndCaption(t *testing.T) {
 	options := []CTAOption{{ID: "contactUs", Label: "Связаться"}, {ID: "signUp", Label: "Вступить"}}
@@ -30,6 +39,56 @@ func TestResolveCTAFallsBackToTheAction(t *testing.T) {
 	}
 	if got := ResolveCTA("", "join_community", options); got != "signUp" {
 		t.Fatalf("вступление = %q", got)
+	}
+}
+
+// banner_fields caps a page at 50 rows and the buttons sit well past the first
+// one, so the registry has to be paged through to the end.
+func TestCTAOptionsPagesThroughTheRegistry(t *testing.T) {
+	start := time.Unix(1_700_000_000, 0)
+	zaley := zaleyStub(t, start)
+	defer zaley.Close()
+
+	var offsets []string
+	ads := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		offsets = append(offsets, q.Get("offset"))
+		if q.Get("limit") != "50" {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"fields":{"limit":{"code":"max_value"}}}}`))
+			return
+		}
+		items := make([]any, 0, 50)
+		if q.Get("offset") == "0" {
+			for i := 0; i < 50; i++ {
+				items = append(items, map[string]any{"name": fmt.Sprintf("text_%d", i)})
+			}
+		} else {
+			items = append(items, map[string]any{
+				"name":   "cta_community_vk",
+				"limits": map[string]any{"values": []string{"signUp", "contactUs"}},
+			})
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"count": 51, "items": items})
+	}))
+	defer ads.Close()
+
+	clock := &clocks{}
+	clock.set(start)
+	svc := newService(t, zaley.URL, ads.URL, clock, 2*time.Minute)
+
+	got := svc.CTAOptions(context.Background(), CTARoleCommunity)
+	if len(got) != 2 || got[0].ID != "signUp" || got[1].Label != "Связаться" {
+		t.Fatalf("кнопки = %#v", got)
+	}
+	if strings.Join(offsets, ",") != "0,50" {
+		t.Fatalf("страницы = %v", offsets)
+	}
+
+	// The second call must come from the cache rather than walk VK again.
+	svc.CTAOptions(context.Background(), CTARoleCommunity)
+	if strings.Join(offsets, ",") != "0,50" {
+		t.Fatalf("реестр перечитан: %v", offsets)
 	}
 }
 

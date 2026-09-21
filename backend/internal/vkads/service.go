@@ -57,6 +57,8 @@ type Service struct {
 	padsAt        time.Time
 	patterns      []BannerPattern
 	patternsAt    time.Time
+	ctaCatalog    map[string][]string
+	ctaAt         time.Time
 	user          *User
 	userAt        time.Time
 	nextOK        time.Time
