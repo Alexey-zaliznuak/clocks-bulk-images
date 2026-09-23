@@ -1,6 +1,14 @@
 package vkads
 
-import "testing"
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+)
 
 func testCatalog() *Catalog {
 	return &Catalog{
@@ -123,5 +131,80 @@ func TestAttachBanner(t *testing.T) {
 	list, _ := group["banners"].([]any)
 	if len(list) != 1 {
 		t.Fatalf("banners = %#v", group["banners"])
+	}
+}
+
+func TestCommunityURLAppendsRefTags(t *testing.T) {
+	got, err := CommunityURL(Settings{CommunityID: 42, RefTags: "?ref_source=manual&ref={{banner_id}}"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "https://vk.com/club42?ref_source=manual&ref={{banner_id}}"
+	if got != want {
+		t.Fatalf("CommunityURL() = %q, want %q", got, want)
+	}
+}
+
+func TestCommunityURLKeepsCompleteManualURL(t *testing.T) {
+	want := "https://vk.com/im?sel=-42&ref_source=manual&ref={{banner_id}}"
+	got, err := CommunityURL(Settings{CommunityID: 42, RefTags: want})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("CommunityURL() = %q, want %q", got, want)
+	}
+}
+
+func TestSameDestinationURLAcceptsEncodedMacrosAndQueryOrder(t *testing.T) {
+	want := "https://vk.com/club42?ref_source=manual&ref={{banner_id}}"
+	got := "https://VK.COM/club42?ref=%7B%7Bbanner_id%7D%7D&ref_source=manual"
+	if !sameDestinationURL(want, got) {
+		t.Fatalf("expected equivalent URLs: %q and %q", want, got)
+	}
+}
+
+func TestSameDestinationURLRejectsDefaultRef(t *testing.T) {
+	want := "https://vk.com/club42?ref_source=manual&ref={{banner_id}}"
+	got := "https://vk.com/club42?ref_source=vk_ads_yulya&ref={{banner_id}}"
+	if sameDestinationURL(want, got) {
+		t.Fatalf("expected different URLs: %q and %q", want, got)
+	}
+}
+
+func TestCreateURLRejectsMismatchedRegisteredRef(t *testing.T) {
+	start := time.Unix(1_700_000_000, 0)
+	zaley := zaleyStub(t, start)
+	defer zaley.Close()
+
+	const manual = "https://vk.com/club42?ref_source=manual&ref={{banner_id}}"
+	ads := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v2/urls.json":
+			var body struct {
+				URL string `json:"url"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body.URL != manual {
+				t.Fatalf("posted URL = %q", body.URL)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 9})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/urls/9.json":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":  9,
+				"url": "https://vk.com/club42?ref_source=vk_ads_yulya&ref={{banner_id}}",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ads.Close()
+
+	clock := &clocks{}
+	clock.set(start)
+	svc := newService(t, zaley.URL, ads.URL, clock, 2*time.Minute)
+	_, err := svc.CreateURL(context.Background(), manual)
+	if err == nil || !strings.Contains(err.Error(), "registered") {
+		t.Fatalf("CreateURL() error = %v", err)
 	}
 }

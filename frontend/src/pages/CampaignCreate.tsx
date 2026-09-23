@@ -95,6 +95,7 @@ export default function CampaignCreate() {
   const [padsPackage, setPadsPackage] = useState("");
   const [ctaOptions, setCtaOptions] = useState<CTAOption[]>([]);
   const padsTouched = useRef(false);
+  const refTagsInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
@@ -322,6 +323,10 @@ export default function CampaignCreate() {
         audioAssetId: settings.generateAudio ? "" : settings.audioAssetId,
         vkSettings: {
           ...vkSettings,
+          // Read the submitted value from the input as well as React state.
+          // This protects manually pasted REF tags from browser autofill or an
+          // async render leaving the visible DOM value ahead of component state.
+          refTags: refTagsInput.current?.value ?? vkSettings.refTags,
           pads: vkSettings.pads || [],
           budgetDay: vkSettings.budgetDay,
           budgetTotal: vkSettings.budgetTotal,
@@ -436,6 +441,7 @@ export default function CampaignCreate() {
               </div>
               <Field label="REF-метки">
                 <input
+                  ref={refTagsInput}
                   className={inputCls}
                   value={vkSettings.refTags}
                   onChange={(e) => setVkSettings((s) => ({ ...s, refTags: e.target.value }))}

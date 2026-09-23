@@ -93,9 +93,10 @@ func (s Settings) Normalize() Settings {
 	if out.AgeRestrictions == "" {
 		out.AgeRestrictions = DefaultAgeRestrictions
 	}
-	if out.RefTags == "" {
-		out.RefTags = DefaultRefTags
-	}
+	// Do not silently replace an explicitly empty/missing REF value on a
+	// partially filled form. The create-form defaults already supply
+	// DefaultRefTags; applying it again here can hide a lost manual edit and
+	// publish a campaign with a different destination than the operator saw.
 	if out.BannerTitle == "" {
 		out.BannerTitle = DefaultBannerTitle
 	}

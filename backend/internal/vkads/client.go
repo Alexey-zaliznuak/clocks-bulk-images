@@ -22,10 +22,10 @@ func (s *Service) Post(ctx context.Context, path string, body any) ([]byte, erro
 }
 
 const (
-	listPageSize     = 50
-	maxPackagePages  = 8
-	maxPadPages      = 20
-	maxSegmentPages  = 200
+	listPageSize    = 50
+	maxPackagePages = 8
+	maxPadPages     = 20
+	maxSegmentPages = 200
 )
 
 // stopAfterPage ends a VK list walk: short/empty page, no new ids, count
@@ -169,9 +169,9 @@ type Package struct {
 	Objective   textList        `json:"objective"`
 	PricedGoal  *PriceGoal      `json:"priced_goal"`
 	Description string          `json:"description"`
-	PadsTreeID int64           `json:"pads_tree_id"`
-	Options    json.RawMessage `json:"options"`
-	PatternIDs []int64         `json:"-"`
+	PadsTreeID  int64           `json:"pads_tree_id"`
+	Options     json.RawMessage `json:"options"`
+	PatternIDs  []int64         `json:"-"`
 }
 
 // textList accepts either "community" or ["community","socialengagement"].
@@ -385,7 +385,50 @@ func (s *Service) CreateURL(ctx context.Context, rawURL string) (int64, error) {
 	if err := json.Unmarshal(data, &out); err != nil || out.ID == 0 {
 		return 0, fmt.Errorf("vkads urls: unexpected %s", truncate(data, 300))
 	}
+	registered, err := s.GetURL(ctx, out.ID)
+	if err != nil {
+		return 0, fmt.Errorf("vkads url %d: verify: %w", out.ID, err)
+	}
+	if !sameDestinationURL(rawURL, registered) {
+		return 0, fmt.Errorf("vkads url %d: registered %q instead of %q", out.ID, registered, rawURL)
+	}
 	return out.ID, nil
+}
+
+// GetURL reads the canonical destination stored by VK for a URL object. A
+// read-after-write check is important here: banners only receive the numeric
+// id, so otherwise a reused/stale id can silently point at different REF tags.
+func (s *Service) GetURL(ctx context.Context, id int64) (string, error) {
+	data, err := s.Get(ctx, fmt.Sprintf("/api/v2/urls/%d.json", id))
+	if err != nil {
+		return "", err
+	}
+	var out struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil || strings.TrimSpace(out.URL) == "" {
+		return "", fmt.Errorf("unexpected %s", truncate(data, 300))
+	}
+	return out.URL, nil
+}
+
+func sameDestinationURL(want, got string) bool {
+	canonical := func(raw string) (string, bool) {
+		u, err := url.Parse(strings.TrimSpace(raw))
+		if err != nil || !u.IsAbs() {
+			return "", false
+		}
+		u.Scheme = strings.ToLower(u.Scheme)
+		u.Host = strings.ToLower(u.Host)
+		// Query.Encode gives equivalent ordering and treats encoded and literal
+		// VK macros ({{banner_id}} vs %7B%7Bbanner_id%7D%7D) alike.
+		u.RawQuery = u.Query().Encode()
+		u.Fragment = ""
+		return u.String(), true
+	}
+	a, aOK := canonical(want)
+	b, bOK := canonical(got)
+	return aOK && bOK && a == b
 }
 
 type CreatedGroup struct {

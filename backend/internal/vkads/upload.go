@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -57,9 +58,9 @@ func (s *Service) ResolveCatalog(ctx context.Context, settings Settings, created
 	}
 	log.Printf("vkads пакет %d: дерево %d (%d площадок), выбрано %v",
 		pkg.ID, pkg.PadsTreeID, len(CollectPadIDs(tree)), pads)
-	communityURL := fmt.Sprintf("https://vk.com/club%d", settings.CommunityID)
-	if tags := strings.TrimSpace(settings.RefTags); tags != "" {
-		communityURL += "?" + strings.TrimPrefix(tags, "?")
+	communityURL, err := CommunityURL(settings)
+	if err != nil {
+		return nil, err
 	}
 	urlID, err := s.CreateURL(ctx, communityURL)
 	if err != nil {
@@ -86,11 +87,31 @@ func (s *Service) ResolveCatalog(ctx context.Context, settings Settings, created
 	}, nil
 }
 
+// CommunityURL builds the exact destination that must be registered in VK.
+// The UI historically called the value "REF tags", so most campaigns contain
+// only a query string. Accepting a complete URL as well prevents a pasted REF
+// link from becoming an invalid nested query such as
+// https://vk.com/club1?https://vk.com/club1?ref=...
+func CommunityURL(settings Settings) (string, error) {
+	base := fmt.Sprintf("https://vk.com/club%d", settings.CommunityID)
+	ref := strings.TrimSpace(settings.RefTags)
+	if ref == "" {
+		return base, nil
+	}
+	if parsed, err := url.Parse(ref); err == nil && parsed.IsAbs() {
+		if parsed.Scheme != "http" && parsed.Scheme != "https" {
+			return "", fmt.Errorf("vkads: REF URL: unsupported scheme %q", parsed.Scheme)
+		}
+		return parsed.String(), nil
+	}
+	return base + "?" + strings.TrimPrefix(ref, "?"), nil
+}
+
 func PlanBody(name string, settings Settings, cat *Catalog) map[string]any {
 	settings = settings.Normalize()
 	body := map[string]any{
-		"name":             name,
-		"status":           "active",
+		"name":       name,
+		"status":     "active",
 		"date_start": cat.DateStart,
 		"objective":  cat.Package.Objective.ForAPI(),
 	}

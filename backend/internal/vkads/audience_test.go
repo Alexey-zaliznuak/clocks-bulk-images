@@ -155,3 +155,15 @@ func TestSettingsNormalizeEmpty(t *testing.T) {
 		t.Fatalf("banner defaults = %+v", s)
 	}
 }
+
+func TestSettingsNormalizeKeepsManualAndExplicitlyEmptyRefTags(t *testing.T) {
+	manual := Settings{CommunityID: 42, RefTags: "ref_source=manual&ref={{banner_id}}"}.Normalize()
+	if manual.RefTags != "ref_source=manual&ref={{banner_id}}" {
+		t.Fatalf("manual refTags = %q", manual.RefTags)
+	}
+
+	empty := Settings{CommunityID: 42, RefTags: ""}.Normalize()
+	if empty.RefTags != "" {
+		t.Fatalf("empty refTags unexpectedly defaulted to %q", empty.RefTags)
+	}
+}
