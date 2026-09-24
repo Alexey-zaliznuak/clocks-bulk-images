@@ -70,7 +70,9 @@ func TestPlanBodyBudgetStringWhenOptimized(t *testing.T) {
 }
 
 func TestGroupBodyOmitsBudgetWhenOptimized(t *testing.T) {
-	body := GroupBody("Иван", 10, 77, testSettings(true, 999), testCatalog())
+	settings := testSettings(true, 999)
+	settings.RefTags = "ref_source=vk_ads_yulya&ref={{banner_id}}"
+	body := GroupBody("Иван", 10, 77, settings, testCatalog())
 	if _, ok := body["budget_limit_day"]; ok {
 		t.Fatalf("group should not carry campaign budget, got %#v", body["budget_limit_day"])
 	}
@@ -80,8 +82,20 @@ func TestGroupBodyOmitsBudgetWhenOptimized(t *testing.T) {
 	if _, ok := body["enable_utm"]; ok {
 		t.Fatal("package does not allow enable_utm")
 	}
+	if body["utm"] != settings.RefTags {
+		t.Fatalf("group REF tags = %#v, want %q", body["utm"], settings.RefTags)
+	}
 	if _, ok := body["autobidding_mode"]; ok {
 		t.Fatal("optimized group must inherit autobidding_mode from the plan")
+	}
+}
+
+func TestNestedGroupBodyKeepsManualRefTags(t *testing.T) {
+	settings := testSettings(true, 999)
+	settings.RefTags = "https://vk.com/club1?ref_source=manual&ref={{banner_id}}"
+	body := NestedGroupBody("Иван", 77, settings, testCatalog())
+	if body["utm"] != "ref_source=manual&ref={{banner_id}}" {
+		t.Fatalf("nested group REF tags = %#v", body["utm"])
 	}
 }
 

@@ -158,6 +158,13 @@ func GroupBody(name string, planID, audienceID int64, settings Settings, cat *Ca
 		"objective":        cat.Package.Objective.ForAPI(),
 		"targetings":       groupTargetings(settings, audienceID, cat.RussiaID, cat.Pads),
 	}
+	// REF tags are configured on the ad group in VK Ads. Putting them only
+	// in the banner URL leaves the group in automatic mode, which adds VK's
+	// own ref_source=vk_ads to every ad in the group. The package rejects
+	// enable_utm, so provide the explicit tags through the writable utm field.
+	if tags := groupRefTags(settings.RefTags); tags != "" {
+		body["utm"] = tags
+	}
 	if !settings.Optimization {
 		applyMoney(body, settings)
 		body["autobidding_mode"] = autobiddingMode(settings.BiddingStrategy)
@@ -166,6 +173,14 @@ func GroupBody(name string, planID, audienceID int64, settings Settings, cat *Ca
 		body["priced_goal"] = cat.Package.PricedGoal
 	}
 	return body
+}
+
+func groupRefTags(ref string) string {
+	ref = strings.TrimSpace(ref)
+	if parsed, err := url.Parse(ref); err == nil && parsed.IsAbs() {
+		return parsed.RawQuery
+	}
+	return strings.TrimPrefix(ref, "?")
 }
 
 // applyMoney writes budget fields the way the VK Ads API examples do: decimal
